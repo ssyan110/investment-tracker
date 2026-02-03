@@ -37,6 +37,8 @@ function App() {
 
       if (currentVersion < DATA_VERSION || !storedAssets || !storedTransactions) {
         console.log(`Migrating Data from v${currentVersion} to v${DATA_VERSION}`);
+        // Clear old data completely
+        localStorage.clear();
         // Force update to new default data
         setAssets(INITIAL_ASSETS);
         setTransactions(INITIAL_TRANSACTIONS);
