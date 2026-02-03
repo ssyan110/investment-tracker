@@ -1,9 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { DATA_VERSION } from './data';
 import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
 import { calculateInventoryState, runGoldenTest } from './engine';
 import { updateMarketPrices } from './services/marketData';
-import { saveAssets, saveTransactions, saveDataVersion } from './services/storage';
+import { loadAssets, loadTransactions, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
 import { InventoryTable } from './components/InventoryTable';
@@ -27,19 +26,28 @@ function App() {
   // Data State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Initialization Logic for Data Persistence and Versioning
+  // Initialization Logic - Load data from backend
   useEffect(() => {
     const initializeData = async () => {
-      // CLEAR ALL OLD DATA - START FRESH
-      localStorage.clear();
-      
-      // Start with empty data
-      setAssets([]);
-      setTransactions([]);
-      saveDataVersion(DATA_VERSION);
-      
-      console.log("App initialized with zero data");
+      try {
+        setIsLoading(true);
+        const [loadedAssets, loadedTransactions] = await Promise.all([
+          loadAssets(),
+          loadTransactions()
+        ]);
+        
+        setAssets(loadedAssets || []);
+        setTransactions(loadedTransactions || []);
+        console.log("✅ Data loaded from backend");
+      } catch (e) {
+        console.error("Failed to load data from backend", e);
+        setAssets([]);
+        setTransactions([]);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
     initializeData();
@@ -51,19 +59,6 @@ function App() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const goldenTestResult = useMemo(() => runGoldenTest(), []);
-
-  // --- Persistence Effects ---
-  useEffect(() => {
-    if (assets.length > 0) {
-      saveAssets(assets).catch(e => console.error("Error saving assets", e));
-    }
-  }, [assets]);
-
-  useEffect(() => {
-    if (transactions.length > 0) {
-      saveTransactions(transactions).catch(e => console.error("Error saving transactions", e));
-    }
-  }, [transactions]);
 
   // --- Live Price Update on Mount ---
   useEffect(() => {
@@ -164,63 +159,100 @@ function App() {
     setEditingTransaction(null);
   };
 
-  const handleAddTransaction = (assetId: string, type: TransactionType, date: string, quantity: number, price: number, fees: number) => {
-    const newTx: Transaction = {
-      id: `tx-${Date.now()}`,
-      assetId,
-      date,
-      type,
-      quantity,
-      pricePerUnit: price,
-      fees,
-      totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2)
-    };
-    setTransactions(prev => [...prev, newTx]);
+  const handleAddTransaction = async (assetId: string, type: TransactionType, date: string, quantity: number, price: number, fees: number) => {
+    try {
+      const newTx = {
+        assetId,
+        date,
+        type,
+        quantity,
+        pricePerUnit: price,
+        fees,
+        totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2)
+      };
+      const created = await createTransaction(newTx);
+      setTransactions(prev => [...prev, created]);
+    } catch (e) {
+      console.error("Failed to create transaction", e);
+      alert("Failed to create transaction");
+    }
   };
 
-  const handleUpdateTransaction = (id: string, assetId: string, type: TransactionType, date: string, quantity: number, price: number, fees: number) => {
-    setTransactions(prev => prev.map(tx => {
-      if (tx.id === id) {
-        return {
-          ...tx,
-          assetId,
-          type,
-          date,
-          quantity,
-          pricePerUnit: price,
-          fees,
-          totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2)
-        };
-      }
-      return tx;
-    }));
-    setEditingTransaction(null);
+  const handleUpdateTransaction = async (id: string, assetId: string, type: TransactionType, date: string, quantity: number, price: number, fees: number) => {
+    try {
+      const updates = {
+        assetId,
+        type,
+        date,
+        quantity,
+        pricePerUnit: price,
+        fees,
+        totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2)
+      };
+      const updated = await updateTransaction(id, updates);
+      setTransactions(prev => prev.map(tx => tx.id === id ? updated : tx));
+      setEditingTransaction(null);
+    } catch (e) {
+      console.error("Failed to update transaction", e);
+      alert("Failed to update transaction");
+    }
   };
 
-  const handleUpdatePrice = (assetId: string, newPrice: string) => {
-    // Allow typing, handle empty as 0 but preserve intent if needed in a real form
-    // Here we strictly update the numeric value for calculations
-    const price = newPrice === '' ? 0 : parseFloat(newPrice);
-    setAssets(prev => prev.map(a => 
-      a.id === assetId ? { ...a, currentMarketPrice: price } : a
-    ));
+  const handleDeleteTransaction = async (id: string) => {
+    try {
+      await deleteTransaction(id);
+      setTransactions(prev => prev.filter(tx => tx.id !== id));
+    } catch (e) {
+      console.error("Failed to delete transaction", e);
+      alert("Failed to delete transaction");
+    }
   };
 
-  const handleSaveNewAsset = (symbol: string, name: string, currency: string, method: AccountingMethod) => {
-    if (!selectedType) return;
-    
-    const newAsset: Asset = {
-        id: `asset-${Date.now()}`,
+  const handleUpdatePrice = async (assetId: string, newPrice: string) => {
+    try {
+      const price = newPrice === '' ? 0 : parseFloat(newPrice);
+      const asset = assets.find(a => a.id === assetId);
+      if (!asset) return;
+      
+      const updated = await updateAsset(assetId, { ...asset, currentMarketPrice: price });
+      setAssets(prev => prev.map(a => a.id === assetId ? updated : a));
+    } catch (e) {
+      console.error("Failed to update price", e);
+      alert("Failed to update price");
+    }
+  };
+
+  const handleSaveNewAsset = async (symbol: string, name: string, currency: string, method: AccountingMethod) => {
+    try {
+      if (!selectedType) return;
+      
+      const newAsset = {
         symbol,
         name,
         type: selectedType,
         method,
         currency,
-        currentMarketPrice: 0 // Default start at 0
-    };
-    
-    setAssets(prev => [...prev, newAsset]);
-    setShowAddAssetModal(false);
+        currentMarketPrice: 0
+      };
+      
+      const created = await createAsset(newAsset);
+      setAssets(prev => [...prev, created]);
+      setShowAddAssetModal(false);
+    } catch (e) {
+      console.error("Failed to create asset", e);
+      alert("Failed to create asset");
+    }
+  };
+
+  const handleDeleteAsset = async (assetId: string) => {
+    try {
+      await deleteAsset(assetId);
+      setAssets(prev => prev.filter(a => a.id !== assetId));
+      setTransactions(prev => prev.filter(tx => tx.assetId !== assetId));
+    } catch (e) {
+      console.error("Failed to delete asset", e);
+      alert("Failed to delete asset");
+    }
   };
 
   const handleEditClick = (tx: Transaction) => {
