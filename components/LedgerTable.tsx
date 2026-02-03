@@ -5,12 +5,13 @@ import { formatCurrency, formatUnit } from '../utils';
 interface LedgerTableProps {
   transactions: Transaction[];
   onEdit: (transaction: Transaction) => void;
+  onDelete: (id: string) => void;
 }
 
 type SortKey = keyof Transaction;
 type SortDirection = 'asc' | 'desc';
 
-export const LedgerTable: React.FC<LedgerTableProps> = ({ transactions, onEdit }) => {
+export const LedgerTable: React.FC<LedgerTableProps> = ({ transactions, onEdit, onDelete }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: SortDirection }>({
     key: 'date',
@@ -137,12 +138,25 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({ transactions, onEdit }
                   {formatCurrency(tx.totalAmount)}
                 </td>
                 <td className="px-6 py-4 text-center">
-                  <button 
-                    onClick={() => onEdit(tx)}
-                    className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold transition-all hover:scale-105"
-                  >
-                    Edit
-                  </button>
+                  <div className="flex items-center justify-center gap-3">
+                    <button 
+                      onClick={() => onEdit(tx)}
+                      className="text-indigo-400 hover:text-indigo-300 text-xs font-semibold transition-all hover:scale-105"
+                    >
+                      Edit
+                    </button>
+                    <span className="text-zinc-700">|</span>
+                    <button 
+                      onClick={() => {
+                        if (confirm('Delete this transaction?')) {
+                          onDelete(tx.id);
+                        }
+                      }}
+                      className="text-rose-400 hover:text-rose-300 text-xs font-semibold transition-all hover:scale-105"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

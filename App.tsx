@@ -308,7 +308,7 @@ function App() {
       </div>
 
       {/* Global Header */}
-      <header className="fixed top-0 w-full z-50 bg-[#050505]/80 backdrop-blur-xl border-b border-white/5 transition-all duration-300">
+      <header className="fixed top-0 w-full z-50 bg-[#050505]/95 backdrop-blur-xl border-b border-white/5 transition-all duration-300 shadow-lg">
         <div className="max-w-7xl mx-auto px-6 h-16 flex justify-between items-center">
           <div className="flex items-center space-x-3 cursor-pointer group" onClick={handleBackToHome}>
             <div className="h-8 w-8 bg-gradient-to-tr from-yellow-600 to-yellow-400 rounded-lg flex items-center justify-center font-bold text-black shadow-lg shadow-yellow-500/20 group-hover:shadow-yellow-500/40 transition-all">I</div>
@@ -437,7 +437,7 @@ function App() {
 
         {/* --- VIEW 2: TYPE LIST (Layer for selecting Asset) --- */}
         {view === 'TYPE_LIST' && selectedType && (
-           <div className="space-y-12 animate-fade-in-up">
+           <div className="space-y-12 animate-fade-in-up pt-4">
               {/* Header */}
               <div className="flex items-center justify-between">
                  <div className="flex items-center space-x-4">
@@ -531,7 +531,7 @@ function App() {
 
         {/* --- VIEW 3: ASSET DETAIL (Specific Asset Console) --- */}
         {view === 'ASSET_DETAIL' && currentAssetPosition && (
-          <div className="space-y-8 animate-fade-in">
+          <div className="space-y-8 animate-fade-in pt-4">
             {/* Back Nav */}
             <button 
               onClick={handleBackToTypeList}
@@ -682,6 +682,7 @@ function App() {
                         <LedgerTable 
                           transactions={currentAssetTransactions} 
                           onEdit={handleEditClick}
+                          onDelete={handleDeleteTransaction}
                         />
                       </div>
                     )}
