@@ -1,9 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { INITIAL_ASSETS, INITIAL_TRANSACTIONS, DATA_VERSION } from './data';
+import { DATA_VERSION } from './data';
 import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
 import { calculateInventoryState, runGoldenTest } from './engine';
 import { updateMarketPrices } from './services/marketData';
-import { loadAssets, loadTransactions, saveAssets, saveTransactions, clearData, loadDataVersion, saveDataVersion } from './services/storage';
+import { saveAssets, saveTransactions, saveDataVersion } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
 import { InventoryTable } from './components/InventoryTable';
@@ -31,24 +31,15 @@ function App() {
   // Initialization Logic for Data Persistence and Versioning
   useEffect(() => {
     const initializeData = async () => {
-      const currentVersion = loadDataVersion();
-      const storedAssets = await loadAssets();
-      const storedTransactions = await loadTransactions();
-
-      if (currentVersion < DATA_VERSION || !storedAssets || !storedTransactions) {
-        console.log(`Migrating Data from v${currentVersion} to v${DATA_VERSION}`);
-        // Clear old data completely
-        localStorage.clear();
-        // Force update to new default data
-        setAssets(INITIAL_ASSETS);
-        setTransactions(INITIAL_TRANSACTIONS);
-        await saveAssets(INITIAL_ASSETS);
-        await saveTransactions(INITIAL_TRANSACTIONS);
-        saveDataVersion(DATA_VERSION);
-      } else {
-        setAssets(storedAssets);
-        setTransactions(storedTransactions);
-      }
+      // CLEAR ALL OLD DATA - START FRESH
+      localStorage.clear();
+      
+      // Start with empty data
+      setAssets([]);
+      setTransactions([]);
+      saveDataVersion(DATA_VERSION);
+      
+      console.log("App initialized with zero data");
     };
 
     initializeData();
