@@ -30,20 +30,26 @@ function App() {
 
   // Initialization Logic for Data Persistence and Versioning
   useEffect(() => {
-    const currentVersion = loadDataVersion();
-    const storedAssets = loadAssets();
-    const storedTransactions = loadTransactions();
+    const initializeData = async () => {
+      const currentVersion = loadDataVersion();
+      const storedAssets = await loadAssets();
+      const storedTransactions = await loadTransactions();
 
-    if (currentVersion < DATA_VERSION || !storedAssets || !storedTransactions) {
-      console.log(`Migrating Data from v${currentVersion} to v${DATA_VERSION}`);
-      // Force update to new default data
-      setAssets(INITIAL_ASSETS);
-      setTransactions(INITIAL_TRANSACTIONS);
-      saveDataVersion(DATA_VERSION);
-    } else {
-      setAssets(storedAssets);
-      setTransactions(storedTransactions);
-    }
+      if (currentVersion < DATA_VERSION || !storedAssets || !storedTransactions) {
+        console.log(`Migrating Data from v${currentVersion} to v${DATA_VERSION}`);
+        // Force update to new default data
+        setAssets(INITIAL_ASSETS);
+        setTransactions(INITIAL_TRANSACTIONS);
+        await saveAssets(INITIAL_ASSETS);
+        await saveTransactions(INITIAL_TRANSACTIONS);
+        saveDataVersion(DATA_VERSION);
+      } else {
+        setAssets(storedAssets);
+        setTransactions(storedTransactions);
+      }
+    };
+
+    initializeData();
   }, []);
 
   const [isLoadingPrices, setIsLoadingPrices] = useState(false);
@@ -55,11 +61,15 @@ function App() {
 
   // --- Persistence Effects ---
   useEffect(() => {
-    if (assets.length > 0) saveAssets(assets);
+    if (assets.length > 0) {
+      saveAssets(assets).catch(e => console.error("Error saving assets", e));
+    }
   }, [assets]);
 
   useEffect(() => {
-    if (transactions.length > 0) saveTransactions(transactions);
+    if (transactions.length > 0) {
+      saveTransactions(transactions).catch(e => console.error("Error saving transactions", e));
+    }
   }, [transactions]);
 
   // --- Live Price Update on Mount ---
