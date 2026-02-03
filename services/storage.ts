@@ -47,10 +47,21 @@ export const saveAssets = async (assets: Asset[]) => {
   // Save to Supabase if configured
   if (supabase) {
     try {
+      // Format data for Supabase (convert camelCase to snake_case)
+      const formattedAssets = assets.map(a => ({
+        id: a.id,
+        symbol: a.symbol,
+        name: a.name,
+        type: a.type,
+        method: a.method,
+        currency: a.currency,
+        current_market_price: a.currentMarketPrice
+      }));
+      
       // Use upsert to update existing or insert new
       const { error } = await supabase
         .from('assets')
-        .upsert(assets, { onConflict: 'id' });
+        .upsert(formattedAssets);
       
       if (error) throw error;
       console.log("Assets saved to Supabase");
@@ -100,10 +111,22 @@ export const saveTransactions = async (transactions: Transaction[]) => {
   // Save to Supabase if configured
   if (supabase) {
     try {
+      // Format data for Supabase (convert camelCase to snake_case)
+      const formattedTransactions = transactions.map(t => ({
+        id: t.id,
+        asset_id: t.assetId,
+        date: t.date,
+        type: t.type,
+        quantity: t.quantity,
+        price_per_unit: t.pricePerUnit,
+        fees: t.fees,
+        total_amount: t.totalAmount
+      }));
+      
       // Use upsert to update existing or insert new
       const { error } = await supabase
         .from('transactions')
-        .upsert(transactions, { onConflict: 'id' });
+        .upsert(formattedTransactions);
       
       if (error) throw error;
       console.log("Transactions saved to Supabase");
