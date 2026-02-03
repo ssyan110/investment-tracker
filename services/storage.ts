@@ -47,13 +47,10 @@ export const saveAssets = async (assets: Asset[]) => {
   // Save to Supabase if configured
   if (supabase) {
     try {
-      // Delete old assets
-      await supabase.from('assets').delete().neq('id', '');
-      
-      // Insert new assets
+      // Use upsert to update existing or insert new
       const { error } = await supabase
         .from('assets')
-        .insert(assets);
+        .upsert(assets, { onConflict: 'id' });
       
       if (error) throw error;
       console.log("Assets saved to Supabase");
@@ -103,13 +100,10 @@ export const saveTransactions = async (transactions: Transaction[]) => {
   // Save to Supabase if configured
   if (supabase) {
     try {
-      // Delete old transactions
-      await supabase.from('transactions').delete().neq('id', '');
-      
-      // Insert new transactions
+      // Use upsert to update existing or insert new
       const { error } = await supabase
         .from('transactions')
-        .insert(transactions);
+        .upsert(transactions, { onConflict: 'id' });
       
       if (error) throw error;
       console.log("Transactions saved to Supabase");
