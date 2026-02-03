@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
 import { calculateInventoryState, runGoldenTest } from './engine';
-import { updateMarketPrices } from './services/marketData';
+import { updateMarketPrices, fetchSingleAssetPrice } from './services/marketData';
 import { loadAssets, loadTransactions, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
@@ -27,6 +27,7 @@ function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchingPriceId, setFetchingPriceId] = useState<string | null>(null);
 
   // Initialization Logic - Load data from backend
   useEffect(() => {
@@ -219,6 +220,27 @@ function App() {
     } catch (e) {
       console.error("Failed to update price", e);
       alert("Failed to update price");
+    }
+  };
+
+  const handleFetchLivePrice = async (assetId: string) => {
+    try {
+      setFetchingPriceId(assetId);
+      const asset = assets.find(a => a.id === assetId);
+      if (!asset) return;
+      
+      const livePrice = await fetchSingleAssetPrice(asset);
+      if (livePrice !== null) {
+        const updated = await updateAsset(assetId, { ...asset, currentMarketPrice: livePrice });
+        setAssets(prev => prev.map(a => a.id === assetId ? updated : a));
+      } else {
+        alert(`Could not fetch price for ${asset.symbol}. Please try again or enter manually.`);
+      }
+    } catch (e) {
+      console.error("Failed to fetch live price", e);
+      alert("Failed to fetch live price");
+    } finally {
+      setFetchingPriceId(null);
     }
   };
 
@@ -564,11 +586,11 @@ function App() {
               {/* Hero Price Editor */}
               <div className="relative group w-full xl:w-auto">
                  <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl opacity-20 group-hover:opacity-40 blur transition duration-500"></div>
-                 <div className="relative bg-zinc-900 border border-white/10 rounded-xl p-4 flex flex-col items-end min-w-[280px]">
-                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1">
+                 <div className="relative bg-zinc-900 border border-white/10 rounded-xl p-4 flex flex-col items-end min-w-[320px]">
+                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
                         Current Market Price
                      </label>
-                     <div className="flex items-center justify-end w-full">
+                     <div className="flex items-center justify-end w-full mb-3">
                         <span className="text-xl font-mono text-zinc-600 mr-2">{currentAssetPosition.asset.currency}</span>
                         <input 
                             type="number"
@@ -579,11 +601,25 @@ function App() {
                             placeholder="0.00"
                         />
                      </div>
-                     {currentAssetPosition.asset.type === AssetType.GOLD && (
-                        <div className="mt-2 text-[9px] text-amber-500/80 font-mono text-right">
-                           BOT Source (Simulated)
-                        </div>
-                     )}
+                     <button
+                       onClick={() => handleFetchLivePrice(currentAssetPosition.asset.id)}
+                       disabled={fetchingPriceId === currentAssetPosition.asset.id}
+                       className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:bg-zinc-800 disabled:cursor-not-allowed border border-indigo-500/30 hover:border-indigo-500/60 disabled:border-zinc-700 rounded-lg text-xs font-bold text-indigo-300 hover:text-indigo-200 disabled:text-zinc-600 transition-all"
+                     >
+                       {fetchingPriceId === currentAssetPosition.asset.id ? (
+                         <>
+                           <div className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
+                           Fetching...
+                         </>
+                       ) : (
+                         <>
+                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                           </svg>
+                           Fetch Live Price
+                         </>
+                       )}
+                     </button>
                  </div>
               </div>
             </div>
