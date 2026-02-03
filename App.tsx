@@ -586,25 +586,25 @@ function App() {
               {/* Hero Price Editor */}
               <div className="relative group w-full xl:w-auto">
                  <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl opacity-20 group-hover:opacity-40 blur transition duration-500"></div>
-                 <div className="relative bg-zinc-900 border border-white/10 rounded-xl p-4 flex flex-col items-end min-w-[320px]">
+                 <div className="relative bg-zinc-900 border border-white/10 rounded-xl p-4 flex flex-col items-end">
                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
                         Current Market Price
                      </label>
-                     <div className="flex items-center justify-end w-full mb-3">
-                        <span className="text-xl font-mono text-zinc-600 mr-2">{currentAssetPosition.asset.currency}</span>
+                     <div className="flex items-center justify-end w-full mb-4 gap-2 min-w-[280px]">
+                        <span className="text-lg font-mono text-zinc-600 flex-shrink-0">{currentAssetPosition.asset.currency}</span>
                         <input 
                             type="number"
                             step="any"
                             value={currentAssetPosition.asset.currentMarketPrice || ''}
                             onChange={(e) => handleUpdatePrice(currentAssetPosition.asset.id, e.target.value)}
-                            className="w-full bg-transparent text-4xl font-bold font-mono text-white text-right focus:outline-none placeholder-zinc-800"
+                            className="flex-1 bg-transparent text-3xl font-bold font-mono text-white text-right focus:outline-none placeholder-zinc-800 min-w-0"
                             placeholder="0.00"
                         />
                      </div>
                      <button
                        onClick={() => handleFetchLivePrice(currentAssetPosition.asset.id)}
                        disabled={fetchingPriceId === currentAssetPosition.asset.id}
-                       className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:bg-zinc-800 disabled:cursor-not-allowed border border-indigo-500/30 hover:border-indigo-500/60 disabled:border-zinc-700 rounded-lg text-xs font-bold text-indigo-300 hover:text-indigo-200 disabled:text-zinc-600 transition-all"
+                       className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:bg-zinc-800 disabled:cursor-not-allowed border border-indigo-500/30 hover:border-indigo-500/60 disabled:border-zinc-700 rounded-lg text-xs font-bold text-indigo-300 hover:text-indigo-200 disabled:text-zinc-600 transition-all whitespace-nowrap"
                      >
                        {fetchingPriceId === currentAssetPosition.asset.id ? (
                          <>
