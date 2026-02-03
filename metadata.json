@@ -1,0 +1,5 @@
+{
+  "name": "Investment tracker",
+  "description": "Bank-grade personal investment tracking system with double-entry style validation and strict inventory accounting.",
+  "requestFramePermissions": []
+}
