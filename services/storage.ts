@@ -1,7 +1,19 @@
 import { Asset, Transaction } from '../types';
 
 // API base URL - will be set based on environment
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const getApiUrl = (): string => {
+  // Use configured URL if available
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  // Default to current host for cross-device compatibility
+  const protocol = window.location.protocol;
+  const host = window.location.hostname;
+  const port = 3000; // Backend runs on 3000
+  return `${protocol}//${host}:${port}/api`;
+};
+
+const API_URL = getApiUrl();
 
 // ===== ASSETS =====
 

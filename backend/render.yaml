@@ -1,0 +1,20 @@
+services:{
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        sync: false      - key: VITE_SUPABASE_ANON_KEY        sync: false      - key: VITE_SUPABASE_URL        value: production      - key: NODE_ENV    envVars:    startCommand: npm start    buildCommand: npm install && npm run build    plan: free    env: node    name: investment-tracker-backend  - type: web  "name": "investment-tracker-backend",
+  "engines": {
+    "node": "20"
+  }
+}
