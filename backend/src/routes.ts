@@ -3,6 +3,21 @@ import * as db from './db.js';
 
 const router = express.Router();
 
+// ===== COMBINED ENDPOINT (single request for all data) =====
+
+router.get('/all', async (req: Request, res: Response) => {
+  try {
+    const [assets, transactions] = await Promise.all([
+      db.getAssets(),
+      db.getTransactions()
+    ]);
+    res.json({ assets, transactions });
+  } catch (error) {
+    console.error('Error fetching all data:', error);
+    res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
 // ===== ASSETS =====
 
 router.get('/assets', async (req: Request, res: Response) => {

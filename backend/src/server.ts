@@ -9,9 +9,26 @@ const PORT = parseInt(process.env.PORT || '3000', 10);
 app.use(cors());
 app.use(express.json());
 
-// Health check
+// Basic request timing (helps diagnose Render cold starts vs. slow DB queries)
+app.use((req, res, next) => {
+  const startNs = process.hrtime.bigint();
+
+  res.on('finish', () => {
+    const durationMs = Number(process.hrtime.bigint() - startNs) / 1e6;
+    console.log(`${req.method} ${req.originalUrl} ${res.statusCode} ${durationMs.toFixed(1)}ms`);
+  });
+
+  next();
+});
+
+// Health check (also serves as keep-alive ping target)
 app.get('/health', (req: Request, res: Response) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', ts: Date.now() });
+});
+
+// Alias for health at /api/health for consistency  
+app.get('/api/health', (req: Request, res: Response) => {
+  res.json({ status: 'ok', ts: Date.now() });
 });
 
 // API routes

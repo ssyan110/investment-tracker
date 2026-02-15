@@ -4,22 +4,126 @@ import { Asset, Transaction } from '../types';
 const getApiUrl = (): string => {
   // Use configured URL if available
   if (import.meta.env.VITE_API_URL) {
-    return import.meta.env.VITE_API_URL;
+    return String(import.meta.env.VITE_API_URL).replace(/\/+$/, '');
   }
-  // Default to current host for cross-device compatibility
+
+  // In production, prefer same-origin `/api` (works with reverse proxies / rewrites).
+  if (import.meta.env.PROD) {
+    return `${window.location.origin}/api`;
+  }
+
+  // Development default: current host + backend port for cross-device LAN testing.
   const protocol = window.location.protocol;
   const host = window.location.hostname;
-  const port = 3000; // Backend runs on 3000
+  const port = 3000;
   return `${protocol}//${host}:${port}/api`;
 };
 
-const API_URL = getApiUrl();
+export const API_URL = getApiUrl();
+console.info('[api] Using API_URL:', API_URL);
+
+// ===== LOCAL CACHE =====
+// Cache data in localStorage so the app shows data instantly on open,
+// even when the backend is cold-starting (Render free tier: 30-90s wake-up).
+
+const CACHE_KEYS = {
+  assets: 'it_cache_assets',
+  transactions: 'it_cache_transactions',
+  timestamp: 'it_cache_ts',
+} as const;
+
+const writeCache = (assets: Asset[], transactions: Transaction[]) => {
+  try {
+    localStorage.setItem(CACHE_KEYS.assets, JSON.stringify(assets));
+    localStorage.setItem(CACHE_KEYS.transactions, JSON.stringify(transactions));
+    localStorage.setItem(CACHE_KEYS.timestamp, String(Date.now()));
+  } catch {
+    // localStorage full or unavailable – non-critical
+  }
+};
+
+export const readCache = (): { assets: Asset[]; transactions: Transaction[]; ts: number } | null => {
+  try {
+    const a = localStorage.getItem(CACHE_KEYS.assets);
+    const t = localStorage.getItem(CACHE_KEYS.transactions);
+    const ts = localStorage.getItem(CACHE_KEYS.timestamp);
+    if (a && t) {
+      return { assets: JSON.parse(a), transactions: JSON.parse(t), ts: ts ? Number(ts) : 0 };
+    }
+  } catch { /* ignore */ }
+  return null;
+};
+
+export const clearCache = () => {
+  try {
+    localStorage.removeItem(CACHE_KEYS.assets);
+    localStorage.removeItem(CACHE_KEYS.transactions);
+    localStorage.removeItem(CACHE_KEYS.timestamp);
+  } catch { /* ignore */ }
+};
+
+// ===== FETCH HELPERS =====
+
+const fetchWithTimeout = async (
+  url: string,
+  options: RequestInit | undefined,
+  timeoutMs: number
+): Promise<Response> => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+};
+
+const DEFAULT_TIMEOUT_MS = 30000; // 30s to tolerate Render cold-starts
+
+// ===== KEEP-ALIVE PING =====
+// Fire a lightweight /health request ASAP to wake the backend.
+// This runs in parallel with cache-read so the backend starts
+// booting before we even need data.
+export const pingBackend = () => {
+  fetch(`${API_URL}/health`, { method: 'GET' }).catch(() => {});
+};
+
+// ===== COMBINED LOAD (single round-trip) =====
+
+export const loadAll = async (): Promise<{ assets: Asset[]; transactions: Transaction[] } | null> => {
+  try {
+    const response = await fetchWithTimeout(`${API_URL}/all`, undefined, DEFAULT_TIMEOUT_MS);
+    if (!response.ok) throw new Error('Failed to fetch all data');
+    const data = await response.json();
+    const assets = convertAssets(data.assets || []);
+    const transactions = convertTransactions(data.transactions || []);
+    // Update cache on success
+    writeCache(assets, transactions);
+    console.log('✅ All data loaded from backend (single request)');
+    return { assets, transactions };
+  } catch (e) {
+    console.error('Failed to load all data from backend, trying individual endpoints...', e);
+    // Fallback to individual endpoints for backward compatibility
+    try {
+      const [assets, transactions] = await Promise.all([
+        loadAssets(),
+        loadTransactions()
+      ]);
+      if (assets && transactions) {
+        writeCache(assets, transactions);
+        return { assets, transactions };
+      }
+    } catch { /* fall through */ }
+    return null;
+  }
+};
 
 // ===== ASSETS =====
 
 export const loadAssets = async (): Promise<Asset[] | null> => {
   try {
-    const response = await fetch(`${API_URL}/assets`);
+    const response = await fetchWithTimeout(`${API_URL}/assets`, undefined, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to fetch assets');
     const data = await response.json();
     console.log("Assets loaded from backend");
@@ -38,11 +142,11 @@ export const saveAssets = async (assets: Asset[]) => {
 
 export const createAsset = async (asset: Omit<Asset, 'id'>): Promise<Asset> => {
   try {
-    const response = await fetch(`${API_URL}/assets`, {
+    const response = await fetchWithTimeout(`${API_URL}/assets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(convertAssetToDb(asset))
-    });
+    }, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to create asset');
     const data = await response.json();
     console.log("Asset created");
@@ -55,11 +159,11 @@ export const createAsset = async (asset: Omit<Asset, 'id'>): Promise<Asset> => {
 
 export const updateAsset = async (id: string, asset: Partial<Asset>): Promise<Asset> => {
   try {
-    const response = await fetch(`${API_URL}/assets/${id}`, {
+    const response = await fetchWithTimeout(`${API_URL}/assets/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(convertAssetToDb(asset))
-    });
+    }, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to update asset');
     const data = await response.json();
     console.log("Asset updated");
@@ -72,9 +176,9 @@ export const updateAsset = async (id: string, asset: Partial<Asset>): Promise<As
 
 export const deleteAsset = async (id: string): Promise<void> => {
   try {
-    const response = await fetch(`${API_URL}/assets/${id}`, {
+    const response = await fetchWithTimeout(`${API_URL}/assets/${id}`, {
       method: 'DELETE'
-    });
+    }, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to delete asset');
     console.log("Asset deleted");
   } catch (e) {
@@ -87,7 +191,7 @@ export const deleteAsset = async (id: string): Promise<void> => {
 
 export const loadTransactions = async (): Promise<Transaction[] | null> => {
   try {
-    const response = await fetch(`${API_URL}/transactions`);
+    const response = await fetchWithTimeout(`${API_URL}/transactions`, undefined, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to fetch transactions');
     const data = await response.json();
     console.log("Transactions loaded from backend");
@@ -106,11 +210,11 @@ export const saveTransactions = async (transactions: Transaction[]) => {
 
 export const createTransaction = async (transaction: Omit<Transaction, 'id'>): Promise<Transaction> => {
   try {
-    const response = await fetch(`${API_URL}/transactions`, {
+    const response = await fetchWithTimeout(`${API_URL}/transactions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(convertTransactionToDb(transaction))
-    });
+    }, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to create transaction');
     const data = await response.json();
     console.log("Transaction created");
@@ -123,11 +227,11 @@ export const createTransaction = async (transaction: Omit<Transaction, 'id'>): P
 
 export const updateTransaction = async (id: string, transaction: Partial<Transaction>): Promise<Transaction> => {
   try {
-    const response = await fetch(`${API_URL}/transactions/${id}`, {
+    const response = await fetchWithTimeout(`${API_URL}/transactions/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(convertTransactionToDb(transaction))
-    });
+    }, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to update transaction');
     const data = await response.json();
     console.log("Transaction updated");
@@ -140,9 +244,9 @@ export const updateTransaction = async (id: string, transaction: Partial<Transac
 
 export const deleteTransaction = async (id: string): Promise<void> => {
   try {
-    const response = await fetch(`${API_URL}/transactions/${id}`, {
+    const response = await fetchWithTimeout(`${API_URL}/transactions/${id}`, {
       method: 'DELETE'
-    });
+    }, DEFAULT_TIMEOUT_MS);
     if (!response.ok) throw new Error('Failed to delete transaction');
     console.log("Transaction deleted");
   } catch (e) {
@@ -162,7 +266,7 @@ export const saveDataVersion = (version: number) => {
 };
 
 export const clearData = async () => {
-  // Clear is handled by manual deletion
+  clearCache();
 };
 
 // ===== HELPERS =====

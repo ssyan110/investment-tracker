@@ -1,8 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
 import { calculateInventoryState, runGoldenTest } from './engine';
-import { updateMarketPrices, fetchSingleAssetPrice } from './services/marketData';
-import { loadAssets, loadTransactions, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
+// Automatic price fetching disabled - prices are now entered manually only
+import { API_URL, loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
 import { InventoryTable } from './components/InventoryTable';
@@ -27,55 +27,82 @@ function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dataSource, setDataSource] = useState<'none' | 'cache' | 'live'>('none');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [fetchingPriceId, setFetchingPriceId] = useState<string | null>(null);
+  const hasFetched = useRef(false);
 
-  // Initialization Logic - Load data from backend
+  // Initialization Logic:
+  // 1. Immediately show cached data (instant = 0ms)
+  // 2. Fire keep-alive ping to wake backend ASAP
+  // 3. Fetch fresh data in background and merge when ready
   useEffect(() => {
-    const initializeData = async () => {
+    if (hasFetched.current) return;
+    hasFetched.current = true;
+
+    // Step 1: Load cached data instantly
+    const cached = readCache();
+    if (cached) {
+      setAssets(cached.assets);
+      setTransactions(cached.transactions);
+      setDataSource('cache');
+      setIsLoading(false);
+      console.log(`⚡ Showing cached data (${new Date(cached.ts).toLocaleTimeString()})`);
+    }
+
+    // Step 2: Ping backend to start waking it up
+    pingBackend();
+
+    // Step 3: Fetch fresh data in background
+    const fetchFresh = async () => {
       try {
-        setIsLoading(true);
-        const [loadedAssets, loadedTransactions] = await Promise.all([
-          loadAssets(),
-          loadTransactions()
-        ]);
-        
-        setAssets(loadedAssets || []);
-        setTransactions(loadedTransactions || []);
-        console.log("✅ Data loaded from backend");
+        if (!cached) setIsLoading(true);
+        else setIsRefreshing(true);
+        setLoadError(null);
+
+        const result = await loadAll();
+
+        if (result) {
+          setAssets(result.assets);
+          setTransactions(result.transactions);
+          setDataSource('live');
+          console.log('✅ Fresh data loaded from backend');
+        } else if (!cached) {
+          setLoadError(`Could not reach backend at ${API_URL}. Check Vercel env var VITE_API_URL and the Render /health endpoint.`);
+        }
       } catch (e) {
-        console.error("Failed to load data from backend", e);
-        setAssets([]);
-        setTransactions([]);
+        console.error('Failed to load data from backend', e);
+        if (!cached) {
+          setLoadError(`Failed to load data from backend at ${API_URL}.`);
+          setAssets([]);
+          setTransactions([]);
+        }
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     };
 
-    initializeData();
+    fetchFresh();
   }, []);
 
-  const [isLoadingPrices, setIsLoadingPrices] = useState(false);
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
   
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
-  const goldenTestResult = useMemo(() => runGoldenTest(), []);
-
-  // --- Live Price Update on Mount ---
+  // Keep localStorage cache in sync with state after mutations
   useEffect(() => {
-    const fetchPrices = async () => {
-      // Only fetch if we have assets loaded
-      if (assets.length === 0) return;
+    if (dataSource !== 'none' && (assets.length > 0 || transactions.length > 0)) {
+      try {
+        localStorage.setItem('it_cache_assets', JSON.stringify(assets));
+        localStorage.setItem('it_cache_transactions', JSON.stringify(transactions));
+        localStorage.setItem('it_cache_ts', String(Date.now()));
+      } catch { /* ignore */ }
+    }
+  }, [assets, transactions, dataSource]);
 
-      setIsLoadingPrices(true);
-      const updated = await updateMarketPrices(assets);
-      setAssets(updated);
-      setIsLoadingPrices(false);
-    };
-    
-    fetchPrices();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assets.length === 0]); // Run when assets are first populated
+  const goldenTestResult = useMemo(() => runGoldenTest(), []);
 
   // --- Engine & Derivation ---
   // Note: calculateInventoryState depends on transactions, not asset prices.
@@ -224,24 +251,8 @@ function App() {
   };
 
   const handleFetchLivePrice = async (assetId: string) => {
-    try {
-      setFetchingPriceId(assetId);
-      const asset = assets.find(a => a.id === assetId);
-      if (!asset) return;
-      
-      const livePrice = await fetchSingleAssetPrice(asset);
-      if (livePrice !== null) {
-        const updated = await updateAsset(assetId, { ...asset, currentMarketPrice: livePrice });
-        setAssets(prev => prev.map(a => a.id === assetId ? updated : a));
-      } else {
-        alert(`Could not fetch price for ${asset.symbol}. Please try again or enter manually.`);
-      }
-    } catch (e) {
-      console.error("Failed to fetch live price", e);
-      alert("Failed to fetch live price");
-    } finally {
-      setFetchingPriceId(null);
-    }
+    // This function is no longer used - prices must be entered manually
+    console.warn("Live price fetching is disabled. Please enter prices manually.");
   };
 
   const handleSaveNewAsset = async (symbol: string, name: string, currency: string, method: AccountingMethod) => {
@@ -291,15 +302,21 @@ function App() {
   const handleDataImport = (newAssets: Asset[], newTransactions: Transaction[]) => {
     setAssets(newAssets);
     setTransactions(newTransactions);
-    saveDataVersion(DATA_VERSION);
+    // Update localStorage cache with imported data
+    try {
+      localStorage.setItem('it_cache_assets', JSON.stringify(newAssets));
+      localStorage.setItem('it_cache_transactions', JSON.stringify(newTransactions));
+      localStorage.setItem('it_cache_ts', String(Date.now()));
+    } catch { /* ignore */ }
+    setDataSource('live');
     setView('HOME');
   };
 
   const handleDataReset = () => {
-    clearData();
-    setAssets(INITIAL_ASSETS);
-    setTransactions(INITIAL_TRANSACTIONS);
-    saveDataVersion(DATA_VERSION);
+    clearCache();
+    setAssets([]);
+    setTransactions([]);
+    setDataSource('none');
     setView('HOME');
   };
 
@@ -337,12 +354,6 @@ function App() {
             <h1 className="text-lg font-bold tracking-tight text-white group-hover:text-zinc-200 transition-colors">Investment tracker</h1>
           </div>
           <div className="flex items-center space-x-6">
-             {isLoadingPrices && (
-               <div className="flex items-center space-x-2">
-                 <div className="w-2 h-2 bg-indigo-400 rounded-full animate-ping"></div>
-                 <span className="text-[10px] text-indigo-300 uppercase tracking-widest">Syncing Markets...</span>
-               </div>
-             )}
              {selectedType && (
                 <div className="flex items-center space-x-2 text-[10px] font-bold tracking-widest uppercase hidden md:flex">
                   <span className={`px-2 py-1 rounded cursor-pointer hover:bg-white/10 ${!selectedAssetId ? 'text-indigo-300' : 'text-zinc-500'}`} onClick={handleBackToTypeList}>
@@ -381,9 +392,63 @@ function App() {
       )}
 
       <main className="relative z-10 max-w-7xl mx-auto p-6 md:p-8 pt-28">
+        {loadError && (
+          <div className="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+            {loadError}
+          </div>
+        )}
+
+        {/* Refreshing indicator */}
+        {isRefreshing && (
+          <div className="mb-4 flex items-center gap-2 text-xs text-indigo-400 animate-pulse">
+            <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+            Syncing latest data from server…
+          </div>
+        )}
+
+        {/* Cached data notice */}
+        {dataSource === 'cache' && !isRefreshing && (
+          <div className="mb-4 flex items-center gap-2 text-xs text-amber-400/70">
+            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
+            Showing cached data — waiting for server
+          </div>
+        )}
+
+        {/* Loading skeleton when no data at all */}
+        {isLoading && dataSource === 'none' && (
+          <div className="space-y-12 animate-pulse">
+            <div>
+              <div className="flex flex-col md:flex-row justify-between items-end pb-8 border-b border-white/5 mb-8">
+                <div>
+                  <div className="h-12 w-56 bg-zinc-800 rounded-xl mb-3"></div>
+                  <div className="h-4 w-40 bg-zinc-900 rounded"></div>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-zinc-900/40 rounded-3xl border border-white/5 p-8 h-28"></div>
+                <div className="bg-zinc-900/40 rounded-3xl border border-white/5 p-8 h-28"></div>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1,2,3,4].map(i => (
+                <div key={i} className="bg-zinc-900/40 rounded-3xl border border-white/5 p-6 h-48">
+                  <div className="h-3 w-16 bg-zinc-800 rounded mb-6"></div>
+                  <div className="h-8 w-32 bg-zinc-800 rounded mb-6"></div>
+                  <div className="h-4 w-24 bg-zinc-900 rounded"></div>
+                </div>
+              ))}
+            </div>
+            <div className="text-center py-10">
+              <div className="inline-flex items-center gap-3 text-sm text-zinc-500">
+                <svg className="w-5 h-5 animate-spin text-indigo-500" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+                Waking up server — first load may take up to 30 seconds…
+              </div>
+            </div>
+          </div>
+        )}
         
         {/* --- VIEW 1: HOME (Global Dashboard) --- */}
-        {view === 'HOME' && (
+        {view === 'HOME' && !(isLoading && dataSource === 'none') && (
           <div className="space-y-12 animate-fade-in">
             {/* 1. Header & Summary Cards */}
             <div>
@@ -392,11 +457,6 @@ function App() {
                   <h2 className="text-4xl md:text-5xl font-bold text-white tracking-tight">Portfolio</h2>
                   <div className="flex items-center gap-2 mt-2">
                     <p className="text-zinc-500 text-sm tracking-wide">ASSET ALLOCATION & INVENTORY</p>
-                    {!isLoadingPrices && (
-                      <span className="text-[10px] text-zinc-600 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-full">
-                        Prices Updated
-                      </span>
-                    )}
                   </div>
                 </div>
                 
@@ -583,12 +643,11 @@ function App() {
                 </div>
               </div>
 
-              {/* Hero Price Editor */}
-              <div className="relative group w-full xl:w-auto">
+                 <div className="relative group w-full xl:w-auto">
                  <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl opacity-20 group-hover:opacity-40 blur transition duration-500"></div>
                  <div className="relative bg-zinc-900 border border-white/10 rounded-xl p-4 flex flex-col items-end">
                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
-                        Current Market Price
+                        Manual Market Price
                      </label>
                      <div className="flex items-center justify-end w-full mb-4 gap-2 min-w-[280px]">
                         <span className="text-lg font-mono text-zinc-600 flex-shrink-0">{currentAssetPosition.asset.currency}</span>
@@ -601,25 +660,6 @@ function App() {
                             placeholder="0.00"
                         />
                      </div>
-                     <button
-                       onClick={() => handleFetchLivePrice(currentAssetPosition.asset.id)}
-                       disabled={fetchingPriceId === currentAssetPosition.asset.id}
-                       className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600/40 disabled:bg-zinc-800 disabled:cursor-not-allowed border border-indigo-500/30 hover:border-indigo-500/60 disabled:border-zinc-700 rounded-lg text-xs font-bold text-indigo-300 hover:text-indigo-200 disabled:text-zinc-600 transition-all whitespace-nowrap"
-                     >
-                       {fetchingPriceId === currentAssetPosition.asset.id ? (
-                         <>
-                           <div className="w-3 h-3 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"></div>
-                           Fetching...
-                         </>
-                       ) : (
-                         <>
-                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                           </svg>
-                           Fetch Live Price
-                         </>
-                       )}
-                     </button>
                  </div>
               </div>
             </div>

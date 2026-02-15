@@ -48,7 +48,7 @@ export const PortfolioHoldings: React.FC<{ positions: PortfolioPosition[] }> = (
     <div className="bg-zinc-900/30 backdrop-blur-md rounded-3xl border border-white/5 overflow-hidden">
       <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
         <h3 className="text-xl font-semibold text-white tracking-tight">Current Holdings</h3>
-        <div className="text-xs text-zinc-500 font-mono">LIVE UPDATE</div>
+        <div className="text-xs text-zinc-500 font-mono">MANUAL PRICE ENTRY</div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
