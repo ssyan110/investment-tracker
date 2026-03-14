@@ -1,213 +1,107 @@
 # Investment Tracker
 
-A professional-grade personal investment tracking system with double-entry style validation and strict inventory accounting.
+A stunning, professional-grade personal investment tracking system featuring an **iOS 26 Liquid Glass** dark mode aesthetic. Designed for mobile-first responsiveness with double-entry style validation and strict inventory accounting.
+
+![Investment Tracker Preview](https://github.com/ssyan110/investment-tracker/assets/preview) *(Add your own screenshot here)*
+
+## ✨ Features
+
+- **📱 Mobile-First Liquid Glass UI:** Beautiful iOS-style frosted glass cards, seamless animations, and dark mode optimizations.
+- **🚀 Serverless Architecture:** Lightning-fast direct database queries via Supabase Edge Network. Zero cold-starts.
+- **🌍 Multi-Asset Tracking:** Manage Gold, ETFs, Stocks, and Crypto all in one unified dashboard.
+- **📊 Advanced Accounting:** Rigorous inventory tracking supporting FIFO, LIFO, and Average Cost methods.
+- **📈 Portfolio Dashboard:** Real-time calculation of Total Value, Unrealized PnL, and ROI percentages.
+- **📔 Immutable Ledger:** Double-entry validation for every buy, sell, and fee transaction.
+
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 - Node.js 18+ installed
-- Supabase account with credentials
+- A [Supabase](https://supabase.com/) account and project
 
 ### Development Setup
 
 **1. Clone and Install Dependencies**
 ```bash
-# Frontend dependencies
+git clone https://github.com/ssyan110/investment-tracker.git
+cd investment-tracker
 npm install
-
-# Backend dependencies
-cd backend && npm install && cd ..
 ```
 
 **2. Configure Environment Variables**
-
-Create `backend/.env`:
+Create a `.env.local` file in the root directory:
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-**3. Start Development Servers**
+**3. Setup Supabase Database**
+Ensure your Supabase project has the following tables created (`assets` and `transactions`). 
+*Note: Ensure Row Level Security (RLS) policies are appropriately configured to allow your app to read/write data.*
 
-Terminal 1 - Backend (port 3000):
-```bash
-cd backend && npm run build && node dist/server.js
-```
-
-Terminal 2 - Frontend (port 5173):
+**4. Start Development Server**
 ```bash
 npm run dev
 ```
 
-**4. Open Browser**
-```
-http://localhost:5173
-```
+**5. Open Browser**
+Navigate to `http://localhost:5173`
+
+---
 
 ## 📁 Project Structure
 
 ```
 investment-tracker/
-├── backend/                 # Express.js backend
-│   ├── src/
-│   │   ├── server.ts       # Express server
-│   │   ├── supabase.ts     # Supabase client
-│   │   ├── db.ts           # Database queries
-│   │   └── routes.ts       # API endpoints
-│   ├── .env                # Supabase credentials
-│   └── package.json        # Backend dependencies
+├── components/             # React UI Components
+│   ├── AddAssetForm.tsx    # Glass modal for new assets
+│   ├── DataManagement.tsx  # JSON Export/Import tools
+│   ├── InventoryTable.tsx  # Audit trail UI
+│   ├── LedgerTable.tsx     # Transaction history UI
+│   ├── PortfolioDashboard.tsx # Main summary cards
+│   └── TransactionForm.tsx # Glass transaction input
 │
-├── components/             # React components
-│   ├── AddAssetForm.tsx
-│   ├── TransactionForm.tsx
-│   ├── PortfolioDashboard.tsx
-│   ├── LedgerTable.tsx
-│   ├── InventoryTable.tsx
-│   └── DataManagement.tsx
+├── services/               
+│   ├── storage.ts          # Core Supabase Data API functions
+│   └── supabaseClient.ts   # Supabase client initializer
 │
-├── services/               # API & data services
-│   ├── storage.ts          # Backend API client
-│   └── marketData.ts       # Market price updates
-│
-├── App.tsx                 # Main application
-├── engine.ts               # Calculation engine
-├── types.ts                # TypeScript types
-├── utils.ts                # Utility functions
+├── App.tsx                 # Main application & routing logic
+├── engine.ts               # Core accounting & math engine
+├── index.css               # Liquid Glass design system & tokens
+├── types.ts                # TypeScript interfaces
+├── utils.ts                # Formatting utilities
 └── vite.config.ts          # Vite configuration
 ```
 
-## 🔌 API Endpoints
-
-### Assets
-- `GET /api/assets` - List all assets
-- `POST /api/assets` - Create asset
-- `PUT /api/assets/:id` - Update asset
-- `DELETE /api/assets/:id` - Delete asset
-
-### Transactions
-- `GET /api/transactions` - List all transactions
-- `POST /api/transactions` - Create transaction
-- `PUT /api/transactions/:id` - Update transaction
-- `DELETE /api/transactions/:id` - Delete transaction
-
-## 📊 Database Schema
-
-### Assets Table
-```sql
-id (TEXT PRIMARY KEY)
-symbol (TEXT)
-name (TEXT)
-type (TEXT)
-method (TEXT)
-currency (TEXT)
-current_market_price (DECIMAL)
-created_at (TIMESTAMP)
-```
-
-### Transactions Table
-```sql
-id (TEXT PRIMARY KEY)
-asset_id (TEXT FOREIGN KEY)
-date (TEXT)
-type (TEXT)
-quantity (DECIMAL)
-price_per_unit (DECIMAL)
-fees (DECIMAL)
-total_amount (DECIMAL)
-created_at (TIMESTAMP)
-```
+---
 
 ## 🛠️ Build & Deploy
 
 ### Production Build
 ```bash
-# Frontend
 npm run build
-
-# Backend
-cd backend && npm run build
 ```
 
-### Deploy to Vercel (Frontend)
-```bash
-# Push to GitHub
-git add .
-git commit -m "Your message"
-git push
+### Deploy to Vercel
+This project is optimized for zero-config deployment on Vercel.
 
-# Vercel auto-deploys on push
-```
+1. Push your code to GitHub.
+2. Import the repository in your Vercel dashboard.
+3. Add your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the **Environment Variables** section in Vercel.
+4. Deploy!
 
-### Deploy Backend
-Choose one:
-- **Render.com** - Free tier available
-- **Railway.app** - Easy Postgres integration
-- **Heroku** - Classic option
-
-Set environment variables on your hosting platform with Supabase credentials.
-
-## 🔧 Available Scripts
-
-**Frontend:**
-```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run preview  # Preview production build
-```
-
-**Backend:**
-```bash
-cd backend
-npm run build    # Compile TypeScript to JavaScript
-node dist/server.js  # Start server
-```
-
-## 📝 Features
-
-✅ Multi-asset portfolio tracking  
-✅ Transaction management (buy/sell/dividend/split)  
-✅ Inventory accounting (FIFO, LIFO, Average Cost)  
-✅ Real-time market price updates  
-✅ Dashboard with portfolio summary  
-✅ Ledger view for transaction history  
-✅ Inventory tracking per asset  
-✅ Double-entry validation  
-
-## 🔒 Security Notes
-
-- Backend `.env` file is in `.gitignore` - never committed to repo
-- Supabase credentials are server-side only
-- Frontend API calls go through backend proxy
-- Use RLS (Row Level Security) in Supabase for production
-
-## 📞 Troubleshooting
-
-**Backend won't start:**
-- Check `backend/.env` exists with valid Supabase credentials
-- Verify Supabase tables exist (assets, transactions)
-- Check port 3000 is not in use
-
-**Frontend can't connect to backend:**
-- Ensure backend is running on port 3000
-- Check `VITE_API_URL` in `.env.local` is `http://localhost:3000/api`
-- Check browser console for CORS errors
-
-**Data not saving:**
-- Check Supabase connection in backend console
-- Verify database tables exist
-- Check API response status in Network tab (should be 201 for POST)
-
-## 📄 Documentation
-
-- **QUICK_REFERENCE.md** - Copy-paste commands and quick tips
-- **LOCAL_TESTING.md** - Step-by-step testing guide
+---
 
 ## 📦 Tech Stack
 
 - **Frontend:** React 18, TypeScript, Vite, TailwindCSS
-- **Backend:** Node.js, Express, TypeScript
-- **Database:** Supabase (PostgreSQL)
-- **Package Manager:** npm
+- **Design System:** Custom iOS 26 Liquid Glass CSS (`index.css`)
+- **Database / Backend:** Supabase (PostgreSQL, Data API)
+- **Deployment:** Vercel
+
+---
 
 ## 📄 License
 
