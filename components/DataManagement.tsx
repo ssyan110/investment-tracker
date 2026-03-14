@@ -8,11 +8,11 @@ interface DataManagementProps {
   onReset: () => void;
 }
 
-export const DataManagement: React.FC<DataManagementProps> = ({ 
-  currentAssets, 
-  currentTransactions, 
-  onImport, 
-  onReset 
+export const DataManagement: React.FC<DataManagementProps> = ({
+  currentAssets,
+  currentTransactions,
+  onImport,
+  onReset
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -23,12 +23,11 @@ export const DataManagement: React.FC<DataManagementProps> = ({
       assets: currentAssets,
       transactions: currentTransactions
     };
-    
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `audit-grade-backup-${new Date().toISOString().split('T')[0]}.json`;
+    link.download = `portfolio-backup-${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -41,7 +40,6 @@ export const DataManagement: React.FC<DataManagementProps> = ({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -56,43 +54,46 @@ export const DataManagement: React.FC<DataManagementProps> = ({
       } catch (err) {
         alert('Failed to parse JSON.');
       }
-      // Reset input
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
     reader.readAsText(file);
   };
 
   return (
-    <div className="flex items-center space-x-4 text-xs">
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        className="hidden" 
-        accept=".json" 
+    <div className="flex items-center gap-2 justify-center flex-wrap">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        className="hidden"
+        accept=".json"
       />
-      
-      <button onClick={handleExport} className="text-zinc-500 hover:text-white transition-colors">
-        Export Data
-      </button>
-      
-      <span className="text-zinc-700">|</span>
-      
-      <button onClick={handleImportClick} className="text-zinc-500 hover:text-white transition-colors">
-        Import JSON
-      </button>
-      
-      <span className="text-zinc-700">|</span>
-      
-      <button 
-        onClick={() => {
-            if(confirm('Are you sure you want to reset to default demo data? All local changes will be lost.')) {
-                onReset();
-            }
-        }} 
-        className="text-rose-500 hover:text-rose-400 transition-colors"
+
+      <button
+        onClick={handleExport}
+        className="glass-btn text-[11px] py-2 px-3"
+        style={{ color: 'var(--text-secondary)' }}
       >
-        Reset App
+        Export
+      </button>
+
+      <button
+        onClick={handleImportClick}
+        className="glass-btn text-[11px] py-2 px-3"
+        style={{ color: 'var(--text-secondary)' }}
+      >
+        Import
+      </button>
+
+      <button
+        onClick={() => {
+          if (confirm('Are you sure you want to reset? All local data will be lost.')) {
+            onReset();
+          }
+        }}
+        className="glass-btn glass-btn-danger text-[11px] py-2 px-3"
+      >
+        Reset
       </button>
     </div>
   );

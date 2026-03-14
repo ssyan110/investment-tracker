@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
 import { calculateInventoryState, runGoldenTest } from './engine';
-// Automatic price fetching disabled - prices are now entered manually only
 import { API_URL, loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
@@ -13,16 +12,28 @@ import { round, formatCurrency, formatUnit } from './utils';
 
 const ASSET_TYPES = [AssetType.GOLD, AssetType.ETF, AssetType.STOCK, AssetType.CRYPTO];
 
+const TYPE_ICONS: Record<string, string> = {
+  [AssetType.GOLD]: '🥇',
+  [AssetType.ETF]: '📊',
+  [AssetType.STOCK]: '📈',
+  [AssetType.CRYPTO]: '₿',
+};
+
+const TYPE_DOT_CLASS: Record<string, string> = {
+  [AssetType.GOLD]: 'type-dot-gold',
+  [AssetType.ETF]: 'type-dot-etf',
+  [AssetType.STOCK]: 'type-dot-stock',
+  [AssetType.CRYPTO]: 'type-dot-crypto',
+};
+
 type ViewState = 'HOME' | 'TYPE_LIST' | 'ASSET_DETAIL';
 
 function App() {
   const [view, setView] = useState<ViewState>('HOME');
   const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
-  
-  // Tab state for ASSET_DETAIL view
   const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger' | 'inventory'>('dashboard');
-  
+
   // Data State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -30,51 +41,42 @@ function App() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dataSource, setDataSource] = useState<'none' | 'cache' | 'live'>('none');
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [fetchingPriceId, setFetchingPriceId] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
-  // Initialization Logic:
-  // 1. Immediately show cached data (instant = 0ms)
-  // 2. Fire keep-alive ping to wake backend ASAP
-  // 3. Fetch fresh data in background and merge when ready
+  const [showAddAssetModal, setShowAddAssetModal] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
+
   useEffect(() => {
     if (hasFetched.current) return;
     hasFetched.current = true;
 
-    // Step 1: Load cached data instantly
     const cached = readCache();
     if (cached) {
       setAssets(cached.assets);
       setTransactions(cached.transactions);
       setDataSource('cache');
       setIsLoading(false);
-      console.log(`⚡ Showing cached data (${new Date(cached.ts).toLocaleTimeString()})`);
     }
 
-    // Step 2: Ping backend to start waking it up
     pingBackend();
 
-    // Step 3: Fetch fresh data in background
     const fetchFresh = async () => {
       try {
         if (!cached) setIsLoading(true);
         else setIsRefreshing(true);
         setLoadError(null);
-
         const result = await loadAll();
-
         if (result) {
           setAssets(result.assets);
           setTransactions(result.transactions);
           setDataSource('live');
-          console.log('✅ Fresh data loaded from backend');
         } else if (!cached) {
-          setLoadError(`Could not reach backend at ${API_URL}. Check Vercel env var VITE_API_URL and the Render /health endpoint.`);
+          setLoadError('Could not reach database. Please check your connection.');
         }
       } catch (e) {
-        console.error('Failed to load data from backend', e);
+        console.error('Failed to load data', e);
         if (!cached) {
-          setLoadError(`Failed to load data from backend at ${API_URL}.`);
+          setLoadError('Failed to load data from database.');
           setAssets([]);
           setTransactions([]);
         }
@@ -87,11 +89,7 @@ function App() {
     fetchFresh();
   }, []);
 
-  const [showAddAssetModal, setShowAddAssetModal] = useState(false);
-  
-  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-
-  // Keep localStorage cache in sync with state after mutations
+  // Keep localStorage cache in sync
   useEffect(() => {
     if (dataSource !== 'none' && (assets.length > 0 || transactions.length > 0)) {
       try {
@@ -104,8 +102,6 @@ function App() {
 
   const goldenTestResult = useMemo(() => runGoldenTest(), []);
 
-  // --- Engine & Derivation ---
-  // Note: calculateInventoryState depends on transactions, not asset prices.
   const inventoryState = useMemo(() => {
     const map: Record<string, InventoryState[]> = {};
     assets.forEach(asset => {
@@ -118,47 +114,29 @@ function App() {
     return assets.map(asset => {
       const history = inventoryState[asset.id];
       const latest = history[history.length - 1];
-      
       const units = latest ? latest.unitsAfter : 0;
       const avgCost = latest ? latest.avgCostAfter : 0;
       const investmentAmount = latest ? latest.inventoryValueAfter : 0;
       const marketPrice = asset.currentMarketPrice || 0;
-      
       const marketValue = round(units * marketPrice, 2);
       const unrealizedPnl = round(marketValue - investmentAmount, 2);
       const returnPercentage = investmentAmount > 0 ? unrealizedPnl / investmentAmount : 0;
-
-      return {
-        asset,
-        units,
-        avgCost,
-        investmentAmount,
-        marketPrice,
-        marketValue,
-        unrealizedPnl,
-        returnPercentage
-      };
+      return { asset, units, avgCost, investmentAmount, marketPrice, marketValue, unrealizedPnl, returnPercentage };
     });
   }, [inventoryState, assets]);
 
   const statsByType = useMemo(() => {
-    const stats: Record<string, { value: number, cost: number, pnl: number, count: number }> = {};
+    const stats: Record<string, { value: number; cost: number; pnl: number; count: number }> = {};
     ASSET_TYPES.forEach(t => {
       const typePositions = portfolioPositions.filter(p => p.asset.type === t);
       const value = typePositions.reduce((sum, p) => sum + p.marketValue, 0);
       const cost = typePositions.reduce((sum, p) => sum + p.investmentAmount, 0);
-      stats[t] = {
-        value,
-        cost,
-        pnl: value - cost,
-        count: typePositions.length
-      };
+      stats[t] = { value, cost, pnl: value - cost, count: typePositions.length };
     });
     return stats;
   }, [portfolioPositions]);
 
   // --- Handlers ---
-
   const handleSelectType = (type: AssetType) => {
     setSelectedType(type);
     setView('TYPE_LIST');
@@ -189,15 +167,7 @@ function App() {
 
   const handleAddTransaction = async (assetId: string, type: TransactionType, date: string, quantity: number, price: number, fees: number) => {
     try {
-      const newTx = {
-        assetId,
-        date,
-        type,
-        quantity,
-        pricePerUnit: price,
-        fees,
-        totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2)
-      };
+      const newTx = { assetId, date, type, quantity, pricePerUnit: price, fees, totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2) };
       const created = await createTransaction(newTx);
       setTransactions(prev => [...prev, created]);
     } catch (e) {
@@ -208,15 +178,7 @@ function App() {
 
   const handleUpdateTransaction = async (id: string, assetId: string, type: TransactionType, date: string, quantity: number, price: number, fees: number) => {
     try {
-      const updates = {
-        assetId,
-        type,
-        date,
-        quantity,
-        pricePerUnit: price,
-        fees,
-        totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2)
-      };
+      const updates = { assetId, type, date, quantity, pricePerUnit: price, fees, totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2) };
       const updated = await updateTransaction(id, updates);
       setTransactions(prev => prev.map(tx => tx.id === id ? updated : tx));
       setEditingTransaction(null);
@@ -241,7 +203,6 @@ function App() {
       const price = newPrice === '' ? 0 : parseFloat(newPrice);
       const asset = assets.find(a => a.id === assetId);
       if (!asset) return;
-      
       const updated = await updateAsset(assetId, { ...asset, currentMarketPrice: price });
       setAssets(prev => prev.map(a => a.id === assetId ? updated : a));
     } catch (e) {
@@ -250,24 +211,10 @@ function App() {
     }
   };
 
-  const handleFetchLivePrice = async (assetId: string) => {
-    // This function is no longer used - prices must be entered manually
-    console.warn("Live price fetching is disabled. Please enter prices manually.");
-  };
-
   const handleSaveNewAsset = async (symbol: string, name: string, currency: string, method: AccountingMethod) => {
     try {
       if (!selectedType) return;
-      
-      const newAsset = {
-        symbol,
-        name,
-        type: selectedType,
-        method,
-        currency,
-        currentMarketPrice: 0
-      };
-      
+      const newAsset = { symbol, name, type: selectedType, method, currency, currentMarketPrice: 0 };
       const created = await createAsset(newAsset);
       setAssets(prev => [...prev, created]);
       setShowAddAssetModal(false);
@@ -294,15 +241,11 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleCancelEdit = () => {
-    setEditingTransaction(null);
-  };
+  const handleCancelEdit = () => { setEditingTransaction(null); };
 
-  // --- Data Management Handlers ---
   const handleDataImport = (newAssets: Asset[], newTransactions: Transaction[]) => {
     setAssets(newAssets);
     setTransactions(newTransactions);
-    // Update localStorage cache with imported data
     try {
       localStorage.setItem('it_cache_assets', JSON.stringify(newAssets));
       localStorage.setItem('it_cache_transactions', JSON.stringify(newTransactions));
@@ -320,465 +263,281 @@ function App() {
     setView('HOME');
   };
 
-  // --- Derived Data for Views ---
-  
-  const typePositions = selectedType 
-    ? portfolioPositions.filter(p => p.asset.type === selectedType)
-    : [];
+  // --- Derived Data ---
+  const typePositions = selectedType ? portfolioPositions.filter(p => p.asset.type === selectedType) : [];
+  const currentAssetPosition = selectedAssetId ? portfolioPositions.find(p => p.asset.id === selectedAssetId) : null;
+  const currentAssetTransactions = selectedAssetId ? transactions.filter(t => t.assetId === selectedAssetId) : [];
+  const currentAssetInventory = selectedAssetId ? inventoryState[selectedAssetId] : [];
 
-  const currentAssetPosition = selectedAssetId
-    ? portfolioPositions.find(p => p.asset.id === selectedAssetId)
-    : null;
-
-  const currentAssetTransactions = selectedAssetId
-    ? transactions.filter(t => t.assetId === selectedAssetId)
-    : [];
-
-  const currentAssetInventory = selectedAssetId
-    ? inventoryState[selectedAssetId]
-    : [];
+  // --- Total Portfolio ---
+  const totalValue = portfolioPositions.reduce((s, p) => s + p.marketValue, 0);
+  const totalCost = portfolioPositions.reduce((s, p) => s + p.investmentAmount, 0);
+  const totalPnl = totalValue - totalCost;
+  const totalReturn = totalCost > 0 ? totalPnl / totalCost : 0;
 
   return (
-    <div className="min-h-screen pb-20 font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
-      {/* Background Ambient Glows */}
-      <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-900/20 rounded-full blur-[128px]"></div>
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-900/10 rounded-full blur-[128px]"></div>
-      </div>
+    <div className="min-h-screen min-h-[100dvh] pb-6">
+      {/* Ambient Glow */}
+      <div className="ambient-glow" />
 
-      {/* Global Header */}
-      <header className="fixed top-0 w-full z-50 bg-[#050505]/95 backdrop-blur-xl border-b border-white/5 transition-all duration-300 shadow-lg">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex justify-between items-center">
-          <div className="flex items-center space-x-3 cursor-pointer group" onClick={handleBackToHome}>
-            <div className="h-8 w-8 bg-gradient-to-tr from-yellow-600 to-yellow-400 rounded-lg flex items-center justify-center font-bold text-black shadow-lg shadow-yellow-500/20 group-hover:shadow-yellow-500/40 transition-all">I</div>
-            <h1 className="text-lg font-bold tracking-tight text-white group-hover:text-zinc-200 transition-colors">Investment tracker</h1>
+      {/* ===== HEADER ===== */}
+      <header className="glass-header fixed top-0 w-full z-50 transition-all duration-300">
+        <div className="max-w-lg mx-auto px-4 h-14 flex justify-between items-center">
+          <div className="flex items-center gap-2.5 cursor-pointer" onClick={handleBackToHome}>
+            <div className="h-7 w-7 rounded-[10px] bg-gradient-to-br from-yellow-500 to-amber-600 flex items-center justify-center text-[11px] font-bold text-black shadow-lg shadow-amber-500/20">I</div>
+            <span className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>Portfolio</span>
           </div>
-          <div className="flex items-center space-x-6">
-             {selectedType && (
-                <div className="flex items-center space-x-2 text-[10px] font-bold tracking-widest uppercase hidden md:flex">
-                  <span className={`px-2 py-1 rounded cursor-pointer hover:bg-white/10 ${!selectedAssetId ? 'text-indigo-300' : 'text-zinc-500'}`} onClick={handleBackToTypeList}>
-                    {selectedType}
-                  </span>
-                  {currentAssetPosition && (
-                    <>
-                      <span className="text-zinc-700">/</span>
-                      <span className="text-indigo-300">{currentAssetPosition.asset.symbol}</span>
-                    </>
-                  )}
-                </div>
-             )}
-            <div className="text-[10px] tracking-widest uppercase text-zinc-600 font-mono hidden md:block">
-              SYS_STATUS: <span className={goldenTestResult.passed ? 'text-emerald-500' : 'text-rose-500'}>
-                {goldenTestResult.passed ? 'NOMINAL' : 'FAILURE'}
-              </span>
-            </div>
+          <div className="flex items-center gap-3">
+            {isRefreshing && (
+              <div className="w-4 h-4 border-2 border-transparent border-t-[var(--accent-blue)] rounded-full animate-spin" />
+            )}
+            {view !== 'HOME' && (
+              <button
+                onClick={view === 'ASSET_DETAIL' ? handleBackToTypeList : handleBackToHome}
+                className="flex items-center gap-1 text-[13px] font-medium"
+                style={{ color: 'var(--accent-blue)' }}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                Back
+              </button>
+            )}
           </div>
         </div>
       </header>
 
-      {!goldenTestResult.passed && (
-        <div className="fixed top-16 w-full z-40 bg-rose-500/10 border-b border-rose-500/20 text-rose-200 text-center p-2 text-xs font-mono backdrop-blur-md">
-           CRITICAL: ENGINE VALIDATION FAILED — {goldenTestResult.details}
-        </div>
-      )}
-
-      {/* Modal Overlay */}
+      {/* Modal */}
       {showAddAssetModal && selectedType && (
-        <AddAssetForm 
-          type={selectedType} 
-          onSave={handleSaveNewAsset} 
-          onCancel={() => setShowAddAssetModal(false)} 
-        />
+        <AddAssetForm type={selectedType} onSave={handleSaveNewAsset} onCancel={() => setShowAddAssetModal(false)} />
       )}
 
-      <main className="relative z-10 max-w-7xl mx-auto p-6 md:p-8 pt-28">
+      <main className="relative z-10 max-w-lg mx-auto px-4 pt-20 pb-8">
+        {/* Error */}
         {loadError && (
-          <div className="mb-6 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+          <div className="glass mb-4 px-4 py-3 text-[13px]" style={{ borderColor: 'rgba(255,69,58,0.3)', color: 'var(--accent-red)' }}>
             {loadError}
           </div>
         )}
 
-        {/* Refreshing indicator */}
-        {isRefreshing && (
-          <div className="mb-4 flex items-center gap-2 text-xs text-indigo-400 animate-pulse">
-            <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-            Syncing latest data from server…
-          </div>
-        )}
-
-        {/* Cached data notice */}
-        {dataSource === 'cache' && !isRefreshing && (
-          <div className="mb-4 flex items-center gap-2 text-xs text-amber-400/70">
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
-            Showing cached data — waiting for server
-          </div>
-        )}
-
-        {/* Loading skeleton when no data at all */}
+        {/* ===== LOADING SKELETON ===== */}
         {isLoading && dataSource === 'none' && (
-          <div className="space-y-12 animate-pulse">
-            <div>
-              <div className="flex flex-col md:flex-row justify-between items-end pb-8 border-b border-white/5 mb-8">
-                <div>
-                  <div className="h-12 w-56 bg-zinc-800 rounded-xl mb-3"></div>
-                  <div className="h-4 w-40 bg-zinc-900 rounded"></div>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-zinc-900/40 rounded-3xl border border-white/5 p-8 h-28"></div>
-                <div className="bg-zinc-900/40 rounded-3xl border border-white/5 p-8 h-28"></div>
-              </div>
+          <div className="space-y-4 animate-fade-in">
+            <div className="skeleton h-32 w-full" />
+            <div className="grid grid-cols-2 gap-3">
+              {[1,2,3,4].map(i => <div key={i} className="skeleton h-24" />)}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1,2,3,4].map(i => (
-                <div key={i} className="bg-zinc-900/40 rounded-3xl border border-white/5 p-6 h-48">
-                  <div className="h-3 w-16 bg-zinc-800 rounded mb-6"></div>
-                  <div className="h-8 w-32 bg-zinc-800 rounded mb-6"></div>
-                  <div className="h-4 w-24 bg-zinc-900 rounded"></div>
-                </div>
-              ))}
-            </div>
-            <div className="text-center py-10">
-              <div className="inline-flex items-center gap-3 text-sm text-zinc-500">
-                <svg className="w-5 h-5 animate-spin text-indigo-500" viewBox="0 0 24 24" fill="none"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                Waking up server — first load may take up to 30 seconds…
-              </div>
+            <div className="flex items-center justify-center gap-2 py-8">
+              <div className="w-5 h-5 border-2 border-transparent border-t-[var(--accent-blue)] rounded-full animate-spin" />
+              <span className="text-[13px]" style={{ color: 'var(--text-tertiary)' }}>Loading portfolio…</span>
             </div>
           </div>
         )}
-        
-        {/* --- VIEW 1: HOME (Global Dashboard) --- */}
+
+        {/* ===== VIEW 1: HOME ===== */}
         {view === 'HOME' && !(isLoading && dataSource === 'none') && (
-          <div className="space-y-12 animate-fade-in">
-            {/* 1. Header & Summary Cards */}
-            <div>
-              <div className="flex flex-col md:flex-row justify-between items-end pb-8 border-b border-white/5 mb-8">
-                <div>
-                  <h2 className="text-4xl md:text-5xl font-bold text-white tracking-tight">Portfolio</h2>
-                  <div className="flex items-center gap-2 mt-2">
-                    <p className="text-zinc-500 text-sm tracking-wide">ASSET ALLOCATION & INVENTORY</p>
-                  </div>
-                </div>
-                
-                {/* Data Controls */}
-                <div className="mt-4 md:mt-0">
-                  <DataManagement 
-                    currentAssets={assets} 
-                    currentTransactions={transactions}
-                    onImport={handleDataImport}
-                    onReset={handleDataReset}
-                  />
-                </div>
+          <div className="space-y-5 animate-fade-in">
+            {/* Hero Summary */}
+            <div className="glass-elevated p-5">
+              <div className="text-[11px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--text-tertiary)' }}>Total Portfolio</div>
+              <div className="text-[32px] font-bold font-mono tracking-tight leading-tight" style={{ color: 'var(--text-primary)' }}>
+                {formatCurrency(totalValue)}
               </div>
-              
-              {/* Summary Cards Top */}
-              <PortfolioSummary positions={portfolioPositions} hideCostBasis={true} />
+              <div className="flex items-center gap-2 mt-2">
+                <span className={totalPnl >= 0 ? 'badge-green' : 'badge-red'}>
+                  {totalPnl > 0 ? '+' : ''}{formatCurrency(totalPnl)}
+                </span>
+                <span className="text-[12px] font-mono" style={{ color: totalReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                  {(totalReturn * 100).toFixed(2)}%
+                </span>
+              </div>
             </div>
 
-            {/* 2. Asset Type Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* Data Controls */}
+            <DataManagement
+              currentAssets={assets}
+              currentTransactions={transactions}
+              onImport={handleDataImport}
+              onReset={handleDataReset}
+            />
+
+            {/* Asset Type Cards */}
+            <div className="grid grid-cols-2 gap-3 stagger-children">
               {ASSET_TYPES.map(type => {
                 const stat = statsByType[type];
                 const isPositive = stat.pnl >= 0;
-                
                 return (
-                  <div 
+                  <button
                     key={type}
                     onClick={() => handleSelectType(type)}
-                    className="group relative bg-zinc-900/40 backdrop-blur-md rounded-3xl border border-white/5 p-6 cursor-pointer overflow-hidden transition-all duration-500 hover:bg-zinc-800/60 hover:border-white/10 hover:shadow-[0_0_40px_-15px_rgba(255,255,255,0.05)]"
+                    className="glass text-left p-4 transition-all duration-300 active:scale-[0.97]"
+                    style={{ borderRadius: 'var(--radius-lg)' }}
                   >
-                    <div className="flex justify-between items-center mb-6">
-                      <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 group-hover:text-white transition-colors">{type}</span>
-                      <span className="bg-white/5 text-zinc-400 text-[10px] font-bold px-2 py-1 rounded-full group-hover:bg-white/10">{stat.count} Items</span>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-[18px]">{TYPE_ICONS[type]}</span>
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-glass-elevated)', color: 'var(--text-tertiary)' }}>
+                        {stat.count}
+                      </span>
                     </div>
-                    <div className="mb-1 text-xs text-zinc-500 font-medium">Market Value</div>
-                    <div className="text-3xl font-bold text-white font-mono mb-6 tracking-tight">{formatCurrency(stat.value)}</div>
-                    
-                    <div className="flex justify-between items-end border-t border-white/5 pt-4 group-hover:border-white/10 transition-colors">
-                      <div>
-                        <div className="text-[10px] text-zinc-600 uppercase tracking-wider">Unrealized P/L</div>
-                        <div className={`text-sm font-mono font-medium mt-0.5 ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {isPositive ? '+' : ''}{formatCurrency(stat.pnl)}
-                        </div>
-                      </div>
-                      <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center text-zinc-500 group-hover:border-indigo-500/50 group-hover:text-indigo-400 group-hover:bg-indigo-500/10 transition-all">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" /></svg>
-                      </div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{type}</div>
+                    <div className="text-[17px] font-bold font-mono tracking-tight" style={{ color: 'var(--text-primary)' }}>
+                      {formatCurrency(stat.value)}
                     </div>
-                  </div>
+                    <div className="text-[11px] font-mono mt-1.5" style={{ color: isPositive ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                      {isPositive ? '+' : ''}{formatCurrency(stat.pnl)}
+                    </div>
+                  </button>
                 );
               })}
             </div>
-            
-            {/* 3. Holdings Table at Bottom */}
-            <div className="mt-8">
-               <PortfolioHoldings positions={portfolioPositions} />
+
+            {/* Holdings List */}
+            <PortfolioHoldings positions={portfolioPositions} />
+          </div>
+        )}
+
+        {/* ===== VIEW 2: TYPE LIST ===== */}
+        {view === 'TYPE_LIST' && selectedType && (
+          <div className="space-y-5 animate-slide-up">
+            {/* Type Header */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-[26px]">{TYPE_ICONS[selectedType]}</span>
+                <div>
+                  <h2 className="text-[22px] font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>{selectedType}</h2>
+                  <p className="text-[11px] font-medium" style={{ color: 'var(--text-tertiary)' }}>{typePositions.length} assets</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowAddAssetModal(true)}
+                className="glass-btn-primary glass-btn flex items-center gap-1.5"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Add
+              </button>
+            </div>
+
+            {/* Type Summary */}
+            <PortfolioSummary positions={typePositions} />
+
+            {/* Asset Cards */}
+            <div className="space-y-3 stagger-children">
+              {typePositions.map(pos => (
+                <button
+                  key={pos.asset.id}
+                  onClick={() => handleSelectAsset(pos.asset.id)}
+                  className="glass w-full text-left p-4 transition-all duration-300 active:scale-[0.98] flex items-center gap-4"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`type-dot ${TYPE_DOT_CLASS[pos.asset.type]}`} />
+                      <span className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>{pos.asset.symbol}</span>
+                      <span className="text-[11px] truncate" style={{ color: 'var(--text-tertiary)' }}>{pos.asset.name}</span>
+                    </div>
+                    <div className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>
+                      {formatUnit(pos.units)} units · {pos.asset.currency}
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-[15px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue)}</div>
+                    <div className="text-[11px] font-mono" style={{ color: pos.returnPercentage >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                      {(pos.returnPercentage * 100).toFixed(2)}%
+                    </div>
+                  </div>
+                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              ))}
+
+              {typePositions.length === 0 && (
+                <button
+                  onClick={() => setShowAddAssetModal(true)}
+                  className="glass w-full p-8 flex flex-col items-center gap-2 transition-all active:scale-[0.98]"
+                  style={{ borderStyle: 'dashed' }}
+                >
+                  <svg className="w-6 h-6" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+                  <span className="text-[12px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>Start tracking {selectedType}</span>
+                </button>
+              )}
             </div>
           </div>
         )}
 
-        {/* --- VIEW 2: TYPE LIST (Layer for selecting Asset) --- */}
-        {view === 'TYPE_LIST' && selectedType && (
-           <div className="space-y-12 animate-fade-in-up pt-4">
-              {/* Header */}
-              <div className="flex items-center justify-between">
-                 <div className="flex items-center space-x-4">
-                     <button onClick={handleBackToHome} className="p-2 rounded-full bg-zinc-900 border border-white/5 hover:bg-zinc-800 transition-colors">
-                        <svg className="w-5 h-5 text-zinc-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                     </button>
-                     <div>
-                       <h2 className="text-3xl font-bold text-white tracking-tight">{selectedType} Portfolio</h2>
-                       <p className="text-zinc-500 text-xs uppercase tracking-widest mt-1">Select an asset to manage</p>
-                     </div>
-                 </div>
-                 <button 
-                   onClick={() => setShowAddAssetModal(true)}
-                   className="flex items-center px-4 py-2 bg-zinc-900 hover:bg-indigo-600 text-zinc-300 hover:text-white border border-white/10 hover:border-indigo-500 rounded-lg text-xs font-bold transition-all shadow-lg hover:shadow-indigo-900/20"
-                 >
-                    <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                    Add Asset
-                 </button>
-              </div>
-
-              {/* Aggregate Dashboard for Type */}
-              <PortfolioDashboard positions={typePositions} />
-
-              {/* Asset Selection Grid */}
-              <div>
-                <h3 className="text-lg font-bold text-white mb-6 tracking-tight">Available Assets</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                   {typePositions.map(pos => (
-                      <div 
-                        key={pos.asset.id}
-                        onClick={() => handleSelectAsset(pos.asset.id)}
-                        className="group bg-zinc-900/40 backdrop-blur-md rounded-2xl border border-white/5 p-6 cursor-pointer hover:bg-zinc-800 hover:border-indigo-500/30 transition-all duration-300 relative overflow-hidden"
-                      >
-                         <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-500/5 rounded-full blur-2xl group-hover:bg-indigo-500/10 transition-all"></div>
-                         
-                         <div className="flex justify-between items-start mb-4">
-                            <div>
-                               <div className="text-lg font-bold text-white group-hover:text-indigo-300 transition-colors">{pos.asset.symbol}</div>
-                               <div className="text-xs text-zinc-500">{pos.asset.name}</div>
-                            </div>
-                            <div className="text-right">
-                               <span className="bg-black/20 text-zinc-400 text-[10px] font-mono px-2 py-1 rounded border border-white/5 block mb-1">
-                                  {pos.asset.currency}
-                               </span>
-                               {pos.asset.type === AssetType.GOLD && (
-                                 <span className="text-[9px] text-amber-500/80 uppercase tracking-wider font-bold">BOT Source</span>
-                               )}
-                            </div>
-                         </div>
-
-                         <div className="space-y-2 font-mono text-sm">
-                            <div className="flex justify-between">
-                               <span className="text-zinc-600 text-[10px] uppercase">Units</span>
-                               <span className="text-zinc-300">{formatUnit(pos.units)}</span>
-                            </div>
-                            <div className="flex justify-between">
-                               <span className="text-zinc-600 text-[10px] uppercase">Value</span>
-                               <span className="text-white font-bold">{formatCurrency(pos.marketValue)}</span>
-                            </div>
-                            <div className="flex justify-between border-t border-white/5 pt-2 mt-2">
-                               <span className="text-zinc-600 text-[10px] uppercase">Return</span>
-                               <span className={`${pos.returnPercentage >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {(pos.returnPercentage * 100).toFixed(2)}%
-                               </span>
-                            </div>
-                         </div>
-                         
-                         <div className="mt-4 pt-4 border-t border-white/5 text-center">
-                            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                               Enter Console &rarr;
-                            </span>
-                         </div>
-                      </div>
-                   ))}
-                   
-                   {/* Empty State / Add Placeholder if none */}
-                   {typePositions.length === 0 && (
-                     <div 
-                        onClick={() => setShowAddAssetModal(true)}
-                        className="flex flex-col items-center justify-center p-8 border border-dashed border-zinc-800 rounded-2xl bg-zinc-900/20 text-zinc-600 cursor-pointer hover:border-zinc-700 hover:bg-zinc-900/40 transition-all min-h-[200px]"
-                     >
-                        <svg className="w-8 h-8 mb-3 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
-                        <span className="text-xs font-bold uppercase tracking-wider">Start Tracking {selectedType}</span>
-                     </div>
-                   )}
-                </div>
-              </div>
-           </div>
-        )}
-
-
-        {/* --- VIEW 3: ASSET DETAIL (Specific Asset Console) --- */}
+        {/* ===== VIEW 3: ASSET DETAIL ===== */}
         {view === 'ASSET_DETAIL' && currentAssetPosition && (
-          <div className="space-y-8 animate-fade-in pt-4">
-            {/* Back Nav */}
-            <button 
-              onClick={handleBackToTypeList}
-              className="group flex items-center text-xs font-bold text-zinc-500 hover:text-white transition-colors uppercase tracking-widest"
-            >
-              <svg className="w-4 h-4 mr-2 text-zinc-700 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" /></svg>
-              Return to {selectedType} List
-            </button>
-
-            {/* HEADER with Interactive Price Editor */}
-            <div className="flex flex-col xl:flex-row justify-between items-start xl:items-end border-b border-white/5 pb-8 gap-6">
-              <div>
-                <h2 className="text-5xl font-bold text-white tracking-tight flex flex-wrap items-baseline gap-4">
-                   {currentAssetPosition.asset.symbol} 
-                   <span className="text-xl text-zinc-500 font-medium">{currentAssetPosition.asset.name}</span>
-                </h2>
-                <div className="flex items-center gap-3 mt-4">
-                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs font-mono text-zinc-400">
-                     {currentAssetPosition.asset.type}
-                   </span>
-                   <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs font-mono text-zinc-400">
-                     {currentAssetPosition.asset.method}
-                   </span>
-                    <span className="px-3 py-1 rounded-full bg-white/5 border border-white/5 text-xs font-mono text-zinc-400">
-                     {currentAssetPosition.asset.currency}
-                   </span>
-                </div>
+          <div className="space-y-5 animate-slide-up">
+            {/* Asset Header */}
+            <div className="glass-elevated p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className={`type-dot ${TYPE_DOT_CLASS[currentAssetPosition.asset.type]}`} />
+                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+                  {currentAssetPosition.asset.type} · {currentAssetPosition.asset.method} · {currentAssetPosition.asset.currency}
+                </span>
               </div>
+              <h2 className="text-[26px] font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
+                {currentAssetPosition.asset.symbol}
+              </h2>
+              <p className="text-[13px] mb-4" style={{ color: 'var(--text-tertiary)' }}>{currentAssetPosition.asset.name}</p>
 
-                 <div className="relative group w-full xl:w-auto">
-                 <div className="absolute -inset-1 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl opacity-20 group-hover:opacity-40 blur transition duration-500"></div>
-                 <div className="relative bg-zinc-900 border border-white/10 rounded-xl p-4 flex flex-col items-end">
-                     <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3">
-                        Manual Market Price
-                     </label>
-                     <div className="flex items-center justify-end w-full mb-4 gap-2 min-w-[280px]">
-                        <span className="text-lg font-mono text-zinc-600 flex-shrink-0">{currentAssetPosition.asset.currency}</span>
-                        <input 
-                            type="number"
-                            step="any"
-                            value={currentAssetPosition.asset.currentMarketPrice || ''}
-                            onChange={(e) => handleUpdatePrice(currentAssetPosition.asset.id, e.target.value)}
-                            className="flex-1 bg-transparent text-3xl font-bold font-mono text-white text-right focus:outline-none placeholder-zinc-800 min-w-0"
-                            placeholder="0.00"
-                        />
-                     </div>
-                 </div>
+              {/* Price Input */}
+              <div className="glass p-3 flex items-center gap-3">
+                <span className="text-[11px] font-semibold uppercase" style={{ color: 'var(--text-tertiary)' }}>Price</span>
+                <span className="text-[13px] font-mono" style={{ color: 'var(--text-tertiary)' }}>{currentAssetPosition.asset.currency}</span>
+                <input
+                  type="number"
+                  step="any"
+                  value={currentAssetPosition.asset.currentMarketPrice || ''}
+                  onChange={(e) => handleUpdatePrice(currentAssetPosition.asset.id, e.target.value)}
+                  className="flex-1 bg-transparent text-right text-[18px] font-bold font-mono outline-none"
+                  style={{ color: 'var(--text-primary)' }}
+                  placeholder="0.00"
+                />
               </div>
             </div>
 
-            {/* iOS Styled Segmented Control */}
-            <div className="inline-flex bg-zinc-900/80 p-1.5 rounded-2xl border border-white/5 backdrop-blur-xl">
-              <button
-                onClick={() => setActiveTab('dashboard')}
-                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'dashboard' ? 'bg-zinc-800 text-white shadow-lg shadow-black/20' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                Overview
-              </button>
-              <button
-                onClick={() => setActiveTab('ledger')}
-                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'ledger' ? 'bg-zinc-800 text-white shadow-lg shadow-black/20' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                 Transactions
-              </button>
-              <button
-                onClick={() => setActiveTab('inventory')}
-                className={`px-6 py-2 rounded-xl text-xs font-bold transition-all duration-300 ${activeTab === 'inventory' ? 'bg-zinc-800 text-white shadow-lg shadow-black/20' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >
-                Audit Log
-              </button>
+            {/* Segmented Control */}
+            <div className="segmented-control w-full flex">
+              {(['dashboard', 'ledger', 'inventory'] as const).map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`flex-1 ${activeTab === tab ? 'active' : ''}`}
+                >
+                  {tab === 'dashboard' ? 'Overview' : tab === 'ledger' ? 'Trades' : 'Audit'}
+                </button>
+              ))}
             </div>
 
-            {/* Content Container */}
-            <div className="min-h-[500px]">
-              
+            {/* Tab Content */}
+            <div className="min-h-[300px]">
               {activeTab === 'dashboard' && (
-                <div className="animate-fade-in-up">
-                  {/* Reuse PortfolioDashboard but pass only single position array */}
+                <div className="animate-fade-in">
                   <PortfolioDashboard positions={[currentAssetPosition]} />
                 </div>
               )}
 
-              {(activeTab === 'ledger' || activeTab === 'inventory') && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-fade-in-up">
-                  
-                  {/* Context Sidebar - Simplified now that we are in single asset view */}
-                  <div className="lg:col-span-4 space-y-6">
-                    <div className="bg-zinc-900/40 backdrop-blur-md p-6 rounded-3xl border border-white/5">
-                      <div className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4">
-                        Asset Metadata
-                      </div>
-                      
-                      <div className="space-y-3">
-                         <div className="flex justify-between py-2 border-b border-white/5">
-                            <span className="text-sm text-zinc-400">Method</span>
-                            <span className="text-sm font-mono text-white">{currentAssetPosition.asset.method}</span>
-                         </div>
-                         <div className="flex justify-between py-2 border-b border-white/5">
-                            <span className="text-sm text-zinc-400">Currency</span>
-                            <span className="text-sm font-mono text-white">{currentAssetPosition.asset.currency}</span>
-                         </div>
-                         {/* Price input removed from here - moved to header */}
-                      </div>
-                    </div>
+              {activeTab === 'ledger' && (
+                <div className="space-y-5 animate-fade-in">
+                  <TransactionForm
+                    assets={[currentAssetPosition.asset]}
+                    onAddTransaction={handleAddTransaction}
+                    onUpdateTransaction={handleUpdateTransaction}
+                    initialData={editingTransaction}
+                    onCancel={handleCancelEdit}
+                  />
+                  <LedgerTable
+                    transactions={currentAssetTransactions}
+                    onEdit={handleEditClick}
+                    onDelete={handleDeleteTransaction}
+                  />
+                </div>
+              )}
 
-                    {/* Transaction Form is always visible here for the active asset */}
-                    {activeTab === 'ledger' && (
-                       <div className="relative">
-                         {editingTransaction && (
-                           <div className="absolute -top-3 left-4 bg-indigo-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full z-10 shadow-lg shadow-indigo-500/40">
-                             EDITING
-                           </div>
-                         )}
-                         <TransactionForm 
-                           assets={[currentAssetPosition.asset]} 
-                           onAddTransaction={handleAddTransaction}
-                           onUpdateTransaction={handleUpdateTransaction}
-                           initialData={editingTransaction}
-                           onCancel={handleCancelEdit}
-                         />
-                       </div>
-                    )}
-                  </div>
-
-                  {/* Main Data Area */}
-                  <div className="lg:col-span-8">
-                    
-                    {activeTab === 'ledger' && (
-                      <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                          <h3 className="text-xl font-bold text-white tracking-tight">Ledger</h3>
-                          <div className="flex items-center gap-3">
-                             {editingTransaction && (
-                               <span className="flex h-2 w-2 relative">
-                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
-                                 <span className="relative inline-flex rounded-full h-2 w-2 bg-indigo-500"></span>
-                               </span>
-                             )}
-                             <span className="text-[10px] text-zinc-600 font-mono uppercase tracking-widest">ID: {currentAssetPosition.asset.id}</span>
-                          </div>
-                        </div>
-                        <LedgerTable 
-                          transactions={currentAssetTransactions} 
-                          onEdit={handleEditClick}
-                          onDelete={handleDeleteTransaction}
-                        />
-                      </div>
-                    )}
-
-                    {activeTab === 'inventory' && (
-                      <div className="space-y-6">
-                        <div className="flex justify-between items-center">
-                           <h3 className="text-xl font-bold text-white tracking-tight">Inventory State</h3>
-                           <span className="text-[10px] text-emerald-500/80 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 font-mono">VERIFIED IMMUTABLE</span>
-                        </div>
-                        <InventoryTable history={currentAssetInventory} currency={currentAssetPosition.asset.currency} />
-                      </div>
-                    )}
-                  </div>
+              {activeTab === 'inventory' && (
+                <div className="animate-fade-in">
+                  <InventoryTable history={currentAssetInventory} currency={currentAssetPosition.asset.currency} />
                 </div>
               )}
             </div>
           </div>
         )}
-
       </main>
     </div>
   );

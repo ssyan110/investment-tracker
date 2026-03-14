@@ -9,10 +9,10 @@ interface TransactionFormProps {
   onCancel: () => void;
 }
 
-export const TransactionForm: React.FC<TransactionFormProps> = ({ 
-  assets, 
-  initialData, 
-  onAddTransaction, 
+export const TransactionForm: React.FC<TransactionFormProps> = ({
+  assets,
+  initialData,
+  onAddTransaction,
   onUpdateTransaction,
   onCancel
 }) => {
@@ -23,7 +23,6 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const [price, setPrice] = useState('');
   const [fees, setFees] = useState('0');
 
-  // Load initial data when editing
   useEffect(() => {
     if (initialData) {
       setAssetId(initialData.assetId);
@@ -45,28 +44,11 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!assetId || !quantity || !price) return;
-    
     if (initialData) {
-      onUpdateTransaction(
-        initialData.id,
-        assetId,
-        type,
-        date,
-        parseFloat(quantity),
-        parseFloat(price),
-        parseFloat(fees)
-      );
+      onUpdateTransaction(initialData.id, assetId, type, date, parseFloat(quantity), parseFloat(price), parseFloat(fees));
     } else {
-      onAddTransaction(
-        assetId,
-        type,
-        date,
-        parseFloat(quantity),
-        parseFloat(price),
-        parseFloat(fees)
-      );
+      onAddTransaction(assetId, type, date, parseFloat(quantity), parseFloat(price), parseFloat(fees));
     }
-    
     if (!initialData) {
       setQuantity('');
       setFees('0');
@@ -75,123 +57,125 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
 
   const isEditing = !!initialData;
 
-  const inputClass = "w-full bg-zinc-900/50 border border-white/10 rounded-xl p-3 text-sm text-white focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 focus:outline-none transition-all duration-300 placeholder-zinc-700";
-  const labelClass = "block text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2 ml-1";
-
   return (
-    <form onSubmit={handleSubmit} className={`p-8 rounded-3xl border backdrop-blur-md transition-all duration-500 ${isEditing ? 'bg-indigo-900/10 border-indigo-500/30 shadow-[0_0_30px_-10px_rgba(99,102,241,0.2)]' : 'bg-zinc-900/30 border-white/5'}`}>
-      <div className="flex justify-between items-center mb-8">
-        <h3 className={`text-lg font-bold tracking-tight ${isEditing ? 'text-indigo-400' : 'text-white'}`}>
-          {isEditing ? `Edit Record #${initialData.id.split('-')[1]}` : 'New Transaction'}
+    <form
+      onSubmit={handleSubmit}
+      className="glass-elevated p-5 transition-all duration-300"
+      style={{
+        borderColor: isEditing ? 'rgba(100,210,255,0.3)' : undefined,
+        boxShadow: isEditing ? '0 0 30px -10px rgba(100,210,255,0.15)' : undefined,
+      }}
+    >
+      <div className="flex justify-between items-center mb-5">
+        <h3 className="text-[15px] font-semibold" style={{ color: isEditing ? 'var(--accent-blue)' : 'var(--text-primary)' }}>
+          {isEditing ? 'Edit Transaction' : 'New Transaction'}
         </h3>
         {isEditing && (
-          <button type="button" onClick={onCancel} className="text-xs text-zinc-500 hover:text-white transition-colors">
-            CANCEL
+          <button type="button" onClick={onCancel} className="text-[12px] font-semibold" style={{ color: 'var(--accent-red)' }}>
+            Cancel
           </button>
         )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="md:col-span-2">
-          <label className={labelClass}>Asset</label>
-          <select 
-            value={assetId} 
-            onChange={e => setAssetId(e.target.value)}
-            className={`${inputClass} appearance-none cursor-pointer`}
-            disabled={isEditing}
-          >
-            {assets.map(a => <option key={a.id} value={a.id}>{a.symbol} — {a.name}</option>)}
-          </select>
+      {/* BUY/SELL Toggle */}
+      <div className="segmented-control w-full flex mb-4">
+        <button
+          type="button"
+          onClick={() => setType(TransactionType.BUY)}
+          className={`flex-1 ${type === TransactionType.BUY ? 'active' : ''}`}
+          style={type === TransactionType.BUY ? { color: 'var(--accent-green)' } : {}}
+        >
+          BUY
+        </button>
+        <button
+          type="button"
+          onClick={() => setType(TransactionType.SELL)}
+          className={`flex-1 ${type === TransactionType.SELL ? 'active' : ''}`}
+          style={type === TransactionType.SELL ? { color: 'var(--accent-red)' } : {}}
+        >
+          SELL
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {/* Date */}
+        <div>
+          <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5 ml-1" style={{ color: 'var(--text-tertiary)' }}>Date</label>
+          <input
+            type="date"
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            className="glass-input"
+            style={{ colorScheme: 'dark' }}
+            required
+          />
         </div>
 
-        <div>
-          <label className={labelClass}>Type</label>
-          <div className="flex bg-zinc-900/80 p-1 rounded-xl border border-white/5">
-            <button
-              type="button"
-              onClick={() => setType(TransactionType.BUY)}
-              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-300 ${type === TransactionType.BUY ? 'bg-emerald-500/20 text-emerald-400 shadow-sm' : 'text-zinc-600 hover:text-zinc-400'}`}
-            >
-              BUY
-            </button>
-            <button
-              type="button"
-              onClick={() => setType(TransactionType.SELL)}
-              className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all duration-300 ${type === TransactionType.SELL ? 'bg-rose-500/20 text-rose-400 shadow-sm' : 'text-zinc-600 hover:text-zinc-400'}`}
-            >
-              SELL
-            </button>
+        {/* Quantity & Price */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5 ml-1" style={{ color: 'var(--text-tertiary)' }}>Quantity</label>
+            <input
+              type="number"
+              step="0.0001"
+              min="0"
+              value={quantity}
+              onChange={e => setQuantity(e.target.value)}
+              className="glass-input font-mono"
+              placeholder="0.0000"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5 ml-1" style={{ color: 'var(--text-tertiary)' }}>Price</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              className="glass-input font-mono"
+              placeholder="0.00"
+              required
+            />
           </div>
         </div>
 
+        {/* Fees */}
         <div>
-          <label className={labelClass}>Date</label>
-          <input 
-            type="date" 
-            value={date} 
-            onChange={e => setDate(e.target.value)}
-            className={`${inputClass} [color-scheme:dark]`}
-            required
-          />
-        </div>
-
-        <div>
-          <label className={labelClass}>Quantity</label>
-          <input 
-            type="number" 
-            step="0.0001" 
+          <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5 ml-1" style={{ color: 'var(--text-tertiary)' }}>Fees</label>
+          <input
+            type="number"
+            step="0.01"
             min="0"
-            value={quantity} 
-            onChange={e => setQuantity(e.target.value)}
-            className={`${inputClass} font-mono`}
-            placeholder="0.0000"
-            required
-          />
-        </div>
-
-        <div>
-          <label className={labelClass}>Price</label>
-          <input 
-            type="number" 
-            step="0.01" 
-            min="0"
-            value={price} 
-            onChange={e => setPrice(e.target.value)}
-            className={`${inputClass} font-mono`}
-            placeholder="0.00"
-            required
-          />
-        </div>
-
-         <div className="md:col-span-2">
-          <label className={labelClass}>Fees</label>
-          <input 
-            type="number" 
-            step="0.01" 
-            min="0"
-            value={fees} 
+            value={fees}
             onChange={e => setFees(e.target.value)}
-            className={`${inputClass} font-mono`}
+            className="glass-input font-mono"
             placeholder="0.00"
           />
         </div>
       </div>
 
-      <div className="mt-8 flex justify-end space-x-4">
-         {isEditing && (
-            <button 
-              type="button"
-              onClick={onCancel}
-              className="px-6 py-3 rounded-xl text-xs font-bold text-zinc-500 hover:bg-zinc-800 transition-colors"
-            >
-              DISCARD
-            </button>
-         )}
-        <button 
-          type="submit" 
-          className={`px-8 py-3 rounded-xl text-xs font-bold tracking-wide transition-all duration-300 transform hover:scale-[1.02] active:scale-[0.98] text-white shadow-lg ${isEditing ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-900/20' : 'bg-zinc-100 text-black hover:bg-white shadow-white/10'}`}
+      <div className="mt-5 flex gap-3">
+        {isEditing && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="glass-btn flex-1"
+          >
+            Discard
+          </button>
+        )}
+        <button
+          type="submit"
+          className={`glass-btn flex-1 ${isEditing ? 'glass-btn-primary' : ''}`}
+          style={!isEditing ? {
+            background: 'linear-gradient(135deg, rgba(100,210,255,0.25), rgba(125,122,255,0.25))',
+            borderColor: 'rgba(100,210,255,0.35)',
+            color: 'var(--accent-blue)',
+          } : {}}
         >
-          {isEditing ? 'UPDATE RECORD' : 'COMMIT TRANSACTION'}
+          {isEditing ? 'Update' : 'Commit'}
         </button>
       </div>
     </form>

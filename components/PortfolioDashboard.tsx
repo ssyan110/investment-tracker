@@ -13,29 +13,26 @@ export const PortfolioSummary: React.FC<PortfolioDashboardProps> = ({ positions,
   const totalUnrealized = totalValue - totalCost;
 
   return (
-    <div className={`grid grid-cols-1 ${hideCostBasis ? 'md:grid-cols-2' : 'md:grid-cols-3'} gap-6`}>
-      <div className="relative overflow-hidden bg-zinc-900/40 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-2xl group hover:bg-zinc-900/60 transition-all duration-500">
-        <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl group-hover:bg-blue-500/20 transition-all duration-500"></div>
-        <div className="text-xs font-semibold tracking-widest text-zinc-500 uppercase mb-2">Total Asset Value</div>
-        <div className="text-3xl font-bold text-white font-mono tracking-tight">
+    <div className="grid grid-cols-2 gap-3">
+      <div className="glass p-4">
+        <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--text-tertiary)' }}>Value</div>
+        <div className="text-[20px] font-bold font-mono tracking-tight" style={{ color: 'var(--text-primary)' }}>
           {formatCurrency(totalValue)}
         </div>
       </div>
 
       {!hideCostBasis && (
-        <div className="relative overflow-hidden bg-zinc-900/40 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-2xl group hover:bg-zinc-900/60 transition-all duration-500">
-          <div className="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-all duration-500"></div>
-          <div className="text-xs font-semibold tracking-widest text-zinc-500 uppercase mb-2">Cost Basis</div>
-          <div className="text-3xl font-bold text-zinc-300 font-mono tracking-tight">
+        <div className="glass p-4">
+          <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--text-tertiary)' }}>Cost Basis</div>
+          <div className="text-[20px] font-bold font-mono tracking-tight" style={{ color: 'var(--text-secondary)' }}>
             {formatCurrency(totalCost)}
           </div>
         </div>
       )}
 
-      <div className="relative overflow-hidden bg-zinc-900/40 backdrop-blur-xl p-8 rounded-3xl border border-white/5 shadow-2xl group hover:bg-zinc-900/60 transition-all duration-500">
-        <div className={`absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 rounded-full blur-2xl transition-all duration-500 ${totalUnrealized >= 0 ? 'bg-emerald-500/10 group-hover:bg-emerald-500/20' : 'bg-rose-500/10 group-hover:bg-rose-500/20'}`}></div>
-        <div className="text-xs font-semibold tracking-widest text-zinc-500 uppercase mb-2">Unrealized P/L</div>
-        <div className={`text-3xl font-bold font-mono tracking-tight ${totalUnrealized >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+      <div className={`glass p-4 ${hideCostBasis ? '' : 'col-span-2'}`}>
+        <div className="text-[10px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--text-tertiary)' }}>Unrealized P/L</div>
+        <div className="text-[20px] font-bold font-mono tracking-tight" style={{ color: totalUnrealized >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
           {totalUnrealized > 0 ? '+' : ''}{formatCurrency(totalUnrealized)}
         </div>
       </div>
@@ -44,48 +41,46 @@ export const PortfolioSummary: React.FC<PortfolioDashboardProps> = ({ positions,
 };
 
 export const PortfolioHoldings: React.FC<{ positions: PortfolioPosition[] }> = ({ positions }) => {
-  return (
-    <div className="bg-zinc-900/30 backdrop-blur-md rounded-3xl border border-white/5 overflow-hidden">
-      <div className="px-8 py-6 border-b border-white/5 flex items-center justify-between bg-white/[0.02]">
-        <h3 className="text-xl font-semibold text-white tracking-tight">Current Holdings</h3>
-        <div className="text-xs text-zinc-500 font-mono">MANUAL PRICE ENTRY</div>
+  if (positions.length === 0) {
+    return (
+      <div className="glass p-8 text-center">
+        <p className="text-[13px]" style={{ color: 'var(--text-tertiary)' }}>No holdings yet</p>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm text-left">
-          <thead className="text-xs uppercase tracking-widest text-zinc-500 font-medium">
-            <tr>
-              <th className="px-8 py-5 bg-black/20">Asset</th>
-              <th className="px-8 py-5 text-right bg-black/20">Units</th>
-              <th className="px-8 py-5 text-right bg-black/20">Avg Cost</th>
-              <th className="px-8 py-5 text-right bg-black/20">Price</th>
-              <th className="px-8 py-5 text-right bg-black/20">Value</th>
-              <th className="px-8 py-5 text-right bg-black/20">P/L</th>
-              <th className="px-8 py-5 text-right bg-black/20">Return</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {positions.map((pos) => (
-              <tr key={pos.asset.id} className="hover:bg-white/[0.03] transition-colors group">
-                <td className="px-8 py-5">
-                  <div className="font-semibold text-white group-hover:text-indigo-400 transition-colors">{pos.asset.symbol}</div>
-                  <div className="text-xs text-zinc-500 mt-0.5">{pos.asset.name}</div>
-                </td>
-                <td className="px-8 py-5 text-right font-mono text-zinc-300">{formatUnit(pos.units)}</td>
-                <td className="px-8 py-5 text-right font-mono text-zinc-500">{formatCurrency(pos.avgCost)}</td>
-                <td className="px-8 py-5 text-right font-mono text-indigo-400">{formatCurrency(pos.marketPrice)}</td>
-                <td className="px-8 py-5 text-right font-mono font-bold text-white shadow-glow">{formatCurrency(pos.marketValue)}</td>
-                <td className={`px-8 py-5 text-right font-mono font-medium ${pos.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+    );
+  }
+
+  return (
+    <div className="glass overflow-hidden">
+      <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border-glass)' }}>
+        <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>Holdings</h3>
+        <span className="text-[10px] font-mono uppercase" style={{ color: 'var(--text-quaternary)' }}>Manual Price</span>
+      </div>
+
+      <div className="divide-y" style={{ borderColor: 'var(--border-glass)' }}>
+        {positions.map((pos) => (
+          <div key={pos.asset.id} className="px-4 py-3 flex items-center gap-3 transition-colors" style={{ ['--tw-divide-opacity' as any]: '1' }}>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-[14px] font-semibold" style={{ color: 'var(--text-primary)' }}>{pos.asset.symbol}</span>
+                <span className="text-[11px] truncate" style={{ color: 'var(--text-tertiary)' }}>{pos.asset.name}</span>
+              </div>
+              <div className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                {formatUnit(pos.units)} @ {formatCurrency(pos.avgCost)}
+              </div>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <div className="text-[14px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue)}</div>
+              <div className="flex items-center justify-end gap-2 mt-0.5">
+                <span className="text-[11px] font-mono" style={{ color: pos.unrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
                   {pos.unrealizedPnl > 0 ? '+' : ''}{formatCurrency(pos.unrealizedPnl)}
-                </td>
-                <td className="px-8 py-5 text-right">
-                  <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold font-mono ${pos.returnPercentage >= 0 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'}`}>
-                    {(pos.returnPercentage * 100).toFixed(2)}%
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </span>
+                <span className={pos.returnPercentage >= 0 ? 'badge-green' : 'badge-red'} style={{ fontSize: '10px', padding: '1px 6px' }}>
+                  {(pos.returnPercentage * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -93,7 +88,7 @@ export const PortfolioHoldings: React.FC<{ positions: PortfolioPosition[] }> = (
 
 export const PortfolioDashboard: React.FC<PortfolioDashboardProps> = (props) => {
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
       <PortfolioSummary {...props} />
       <PortfolioHoldings positions={props.positions} />
     </div>
