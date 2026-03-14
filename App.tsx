@@ -310,7 +310,7 @@ function App() {
         <AddAssetForm type={selectedType} onSave={handleSaveNewAsset} onCancel={() => setShowAddAssetModal(false)} />
       )}
 
-      <main className="relative z-10 max-w-lg mx-auto px-4 pt-20 pb-8">
+      <main className="relative z-10 max-w-lg mx-auto px-4 main-content pb-8">
         {/* Error */}
         {loadError && (
           <div className="glass mb-4 px-4 py-3 text-[13px]" style={{ borderColor: 'rgba(255,69,58,0.3)', color: 'var(--accent-red)' }}>
