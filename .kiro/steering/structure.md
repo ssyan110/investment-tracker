@@ -10,11 +10,13 @@
 ├── utils.ts              # Formatting helpers (round, formatCurrency, formatUnit)
 ├── components/
 │   ├── AddAssetForm.tsx       # Modal form for creating new assets
+│   ├── ConfirmModal.tsx       # Glass-styled confirmation dialog (replaces browser confirm())
 │   ├── DataManagement.tsx     # Export/Import/Reset controls
 │   ├── InventoryTable.tsx     # Audit trail view of inventory state history
-│   ├── LedgerTable.tsx        # Sortable/searchable transaction list
+│   ├── LedgerTable.tsx        # Sortable/searchable transaction list with swipe-to-edit/delete
 │   ├── PortfolioDashboard.tsx # Summary cards + holdings list
-│   └── TransactionForm.tsx    # BUY/SELL transaction entry/edit form
+│   ├── Toast.tsx              # Toast notification system
+│   └── TransactionForm.tsx    # BUY/SELL transaction entry/edit form with note field
 ├── services/
 │   ├── supabaseClient.ts      # Supabase client initialization
 │   ├── storage.ts             # CRUD operations + localStorage cache layer

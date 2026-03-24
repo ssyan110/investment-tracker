@@ -1,19 +1,26 @@
 /**
  * Bank-grade rounding.
- * Note: In a production Node.js environment, we would use 'decimal.js'.
- * For this React demo, we use strict epsilon rounding to avoid IEEE 754 float errors.
+ * Uses strict epsilon rounding to avoid IEEE 754 float errors.
  */
 export const round = (value: number, decimals: number = 2): number => {
   return Number(Math.round(Number(value + "e" + decimals)) + "e-" + decimals);
 };
 
 export const formatCurrency = (amount: number, currency: string = 'TWD') => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  }).format(amount);
+  // USDT is not a standard ISO currency code
+  if (currency === 'USDT') {
+    return '$' + new Intl.NumberFormat('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount) + ' ₮';
+  }
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return amount.toFixed(2) + ' ' + currency;
+  }
 };
 
 export const formatUnit = (amount: number) => {

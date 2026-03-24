@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import { Asset, Transaction } from '../types';
 
 interface DataManagementProps {
@@ -6,23 +6,17 @@ interface DataManagementProps {
   currentTransactions: Transaction[];
   onImport: (assets: Asset[], transactions: Transaction[]) => void;
   onReset: () => void;
+  onRequestConfirm: (title: string, message: string, onConfirm: () => void, danger?: boolean) => void;
+  onToast: (text: string, type: 'success' | 'error' | 'info') => void;
 }
 
 export const DataManagement: React.FC<DataManagementProps> = ({
-  currentAssets,
-  currentTransactions,
-  onImport,
-  onReset
+  currentAssets, currentTransactions, onImport, onReset, onRequestConfirm, onToast
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleExport = () => {
-    const data = {
-      version: 1,
-      timestamp: new Date().toISOString(),
-      assets: currentAssets,
-      transactions: currentTransactions
-    };
+    const data = { version: 1, timestamp: new Date().toISOString(), assets: currentAssets, transactions: currentTransactions };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -31,10 +25,8 @@ export const DataManagement: React.FC<DataManagementProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
+    URL.revokeObjectURL(url);
+    onToast('Backup exported', 'success');
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -45,14 +37,15 @@ export const DataManagement: React.FC<DataManagementProps> = ({
       try {
         const json = JSON.parse(event.target?.result as string);
         if (json.assets && json.transactions) {
-          if (confirm(`Importing will overwrite current data. Found ${json.transactions.length} transactions. Continue?`)) {
+          onRequestConfirm('Import Data', `This will overwrite current data with ${json.transactions.length} transactions. Continue?`, () => {
             onImport(json.assets, json.transactions);
-          }
+            onToast('Data imported successfully', 'success');
+          });
         } else {
-          alert('Invalid file format.');
+          onToast('Invalid file format', 'error');
         }
-      } catch (err) {
-        alert('Failed to parse JSON.');
+      } catch {
+        onToast('Failed to parse JSON file', 'error');
       }
       if (fileInputRef.current) fileInputRef.current.value = '';
     };
@@ -61,40 +54,10 @@ export const DataManagement: React.FC<DataManagementProps> = ({
 
   return (
     <div className="flex items-center gap-2 justify-center flex-wrap">
-      <input
-        type="file"
-        ref={fileInputRef}
-        onChange={handleFileChange}
-        className="hidden"
-        accept=".json"
-      />
-
-      <button
-        onClick={handleExport}
-        className="glass-btn text-[11px] py-2 px-3"
-        style={{ color: 'var(--text-secondary)' }}
-      >
-        Export
-      </button>
-
-      <button
-        onClick={handleImportClick}
-        className="glass-btn text-[11px] py-2 px-3"
-        style={{ color: 'var(--text-secondary)' }}
-      >
-        Import
-      </button>
-
-      <button
-        onClick={() => {
-          if (confirm('Are you sure you want to reset? All local data will be lost.')) {
-            onReset();
-          }
-        }}
-        className="glass-btn glass-btn-danger text-[11px] py-2 px-3"
-      >
-        Reset
-      </button>
+      <input type="file" ref={fileInputRef} onChange={handleFileChange} className="hidden" accept=".json" />
+      <button onClick={handleExport} className="glass-btn text-[11px] py-2 px-3" style={{ color: 'var(--text-secondary)' }}>Export</button>
+      <button onClick={() => fileInputRef.current?.click()} className="glass-btn text-[11px] py-2 px-3" style={{ color: 'var(--text-secondary)' }}>Import</button>
+      <button onClick={() => onRequestConfirm('Reset All Data', 'Are you sure? All local data will be permanently lost.', onReset, true)} className="glass-btn glass-btn-danger text-[11px] py-2 px-3">Reset</button>
     </div>
   );
 };
