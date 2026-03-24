@@ -1,108 +1,96 @@
 # Investment Tracker
 
-A stunning, professional-grade personal investment tracking system featuring an **iOS 26 Liquid Glass** dark mode aesthetic. Designed for mobile-first responsiveness with double-entry style validation and strict inventory accounting.
+A mobile-first portfolio management app for tracking multi-asset investments (Gold, ETF, Stock, Crypto). Uses an average-cost accounting engine to compute inventory state, realized P&L, and unrealized P&L from an immutable transaction ledger.
 
-![Investment Tracker Preview](https://github.com/ssyan110/investment-tracker/assets/preview) *(Add your own screenshot here)*
+Built with an iOS "Liquid Glass" dark mode design system.
 
-## ✨ Features
+## Features
 
-- **📱 Mobile-First Liquid Glass UI:** Beautiful iOS-style frosted glass cards, seamless animations, and dark mode optimizations.
-- **🚀 Serverless Architecture:** Lightning-fast direct database queries via Supabase Edge Network. Zero cold-starts.
-- **🌍 Multi-Asset Tracking:** Manage Gold, ETFs, Stocks, and Crypto all in one unified dashboard.
-- **📊 Advanced Accounting:** Rigorous inventory tracking supporting FIFO, LIFO, and Average Cost methods.
-- **📈 Portfolio Dashboard:** Real-time calculation of Total Value, Unrealized PnL, and ROI percentages.
-- **📔 Immutable Ledger:** Double-entry validation for every buy, sell, and fee transaction.
+- Multi-asset tracking: Gold, ETFs, Stocks, Crypto
+- Average Cost accounting engine (pure, stateless, deterministic)
+- Immutable transaction ledger with BUY/SELL operations
+- Portfolio dashboard with unrealized P&L and return %
+- Tap-to-edit market prices (manual entry, no live feeds)
+- Transaction notes
+- Pull-to-refresh gesture (mobile)
+- FAB quick-trade bottom sheet from any screen
+- Swipe-to-edit/delete transactions (mobile), inline buttons (desktop)
+- Glass-styled confirmation modals and toast notifications
+- Desktop sidebar layout with asset tree navigation
+- Asset search across all types
+- Keyboard shortcuts: N (new trade), Esc (close modals)
+- Sync status indicator (cached vs live)
+- JSON export/import for backup and restore
+- localStorage read-through cache for instant load
+- Multi-currency support: TWD, USD, USDT, JPY, EUR
 
----
-
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
-- Node.js 18+ installed
-- A [Supabase](https://supabase.com/) account and project
+- Node.js 18+
+- A [Supabase](https://supabase.com/) project with `assets` and `transactions` tables
 
-### Development Setup
+### Setup
 
-**1. Clone and Install Dependencies**
 ```bash
 git clone https://github.com/ssyan110/investment-tracker.git
 cd investment-tracker
 npm install
 ```
 
-**2. Configure Environment Variables**
-Create a `.env.local` file in the root directory:
+Create `.env.local`:
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-**3. Setup Supabase Database**
-Ensure your Supabase project has the following tables created (`assets` and `transactions`). 
-*Note: Ensure Row Level Security (RLS) policies are appropriately configured to allow your app to read/write data.*
-
-**4. Start Development Server**
+Start dev server:
 ```bash
 npm run dev
 ```
 
-**5. Open Browser**
-Navigate to `http://localhost:5173`
+Open `http://localhost:5173`
 
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
-investment-tracker/
-├── components/             # React UI Components
-│   ├── AddAssetForm.tsx    # Glass modal for new assets
-│   ├── DataManagement.tsx  # JSON Export/Import tools
-│   ├── InventoryTable.tsx  # Audit trail UI
-│   ├── LedgerTable.tsx     # Transaction history UI
-│   ├── PortfolioDashboard.tsx # Main summary cards
-│   └── TransactionForm.tsx # Glass transaction input
-│
-├── services/               
-│   ├── storage.ts          # Core Supabase Data API functions
-│   └── supabaseClient.ts   # Supabase client initializer
-│
-├── App.tsx                 # Main application & routing logic
-├── engine.ts               # Core accounting & math engine
-├── index.css               # Liquid Glass design system & tokens
-├── types.ts                # TypeScript interfaces
-├── utils.ts                # Formatting utilities
-└── vite.config.ts          # Vite configuration
+├── index.html              # Entry HTML (loads Tailwind CDN)
+├── index.tsx               # React root mount
+├── index.css               # Liquid Glass design system (CSS variables, animations)
+├── App.tsx                 # Root component — state, handlers, view routing
+├── types.ts                # TypeScript types and enums
+├── engine.ts               # Pure average-cost calculation engine
+├── utils.ts                # Formatting helpers (currency, units, rounding)
+├── components/
+│   ├── AddAssetForm.tsx    # Modal form for creating new assets
+│   ├── ConfirmModal.tsx    # Glass-styled confirmation dialog
+│   ├── DataManagement.tsx  # Export/Import/Reset controls
+│   ├── InventoryTable.tsx  # Audit trail view of inventory state
+│   ├── LedgerTable.tsx     # Transaction list with swipe-to-edit/delete
+│   ├── PortfolioDashboard.tsx # Summary cards + holdings
+│   ├── Toast.tsx           # Toast notification system
+│   └── TransactionForm.tsx # BUY/SELL form with note field
+├── services/
+│   ├── supabaseClient.ts   # Supabase client init
+│   └── storage.ts          # CRUD + localStorage cache layer
+├── vite.config.ts
+├── tsconfig.json
+└── package.json
 ```
 
----
+## Tech Stack
 
-## 🛠️ Build & Deploy
+- React 18, TypeScript (strict), Vite 5
+- Tailwind CSS (CDN) + custom Liquid Glass CSS
+- Supabase (PostgreSQL via `@supabase/supabase-js`)
 
-### Production Build
+## Build
+
 ```bash
-npm run build
+npm run build     # Production build
+npm run preview   # Preview production build
 ```
 
-### Deploy to Vercel
-This project is optimized for zero-config deployment on Vercel.
-
-1. Push your code to GitHub.
-2. Import the repository in your Vercel dashboard.
-3. Add your `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the **Environment Variables** section in Vercel.
-4. Deploy!
-
----
-
-## 📦 Tech Stack
-
-- **Frontend:** React 18, TypeScript, Vite, TailwindCSS
-- **Design System:** Custom iOS 26 Liquid Glass CSS (`index.css`)
-- **Database / Backend:** Supabase (PostgreSQL, Data API)
-- **Deployment:** Vercel
-
----
-
-## 📄 License
+## License
 
 MIT

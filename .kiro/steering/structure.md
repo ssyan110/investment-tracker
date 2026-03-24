@@ -6,7 +6,7 @@
 ├── index.css             # Global CSS design system (variables, glass components, animations)
 ├── App.tsx               # Root component — routing, state management, all handlers
 ├── types.ts              # Shared TypeScript types and enums (Asset, Transaction, InventoryState, etc.)
-├── engine.ts             # Pure calculation engine (inventory state, golden test)
+├── engine.ts             # Pure average-cost calculation engine (inventory state)
 ├── utils.ts              # Formatting helpers (round, formatCurrency, formatUnit)
 ├── components/
 │   ├── AddAssetForm.tsx       # Modal form for creating new assets
@@ -19,8 +19,7 @@
 │   └── TransactionForm.tsx    # BUY/SELL transaction entry/edit form with note field
 ├── services/
 │   ├── supabaseClient.ts      # Supabase client initialization
-│   ├── storage.ts             # CRUD operations + localStorage cache layer
-│   └── marketData.ts          # Deprecated — manual price entry only
+│   └── storage.ts             # CRUD operations + localStorage cache layer
 ├── vite.config.ts
 ├── tsconfig.json
 └── package.json
