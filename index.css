@@ -325,3 +325,22 @@ button, a, input, select, textarea {
 .stagger-children > *:nth-child(6) { animation-delay: 0.25s; }
 .stagger-children > *:nth-child(7) { animation-delay: 0.3s; }
 .stagger-children > *:nth-child(8) { animation-delay: 0.35s; }
+
+/* ---- Bottom Sheet (sm: centered modal) ---- */
+@media (min-width: 640px) {
+  .animate-slide-up {
+    animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
+/* ---- FAB pulse on idle ---- */
+@keyframes fab-pulse {
+  0%, 100% { box-shadow: 0 8px 32px rgba(100,210,255,0.2), 0 0 0 0.5px rgba(255,255,255,0.1) inset; }
+  50% { box-shadow: 0 8px 40px rgba(100,210,255,0.35), 0 0 0 0.5px rgba(255,255,255,0.15) inset; }
+}
+
+/* ---- Select dropdown dark theme ---- */
+select option {
+  background: #1a1a2e;
+  color: var(--text-primary);
+}

@@ -1,11 +1,11 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
 import { calculateInventoryState, runGoldenTest } from './engine';
-import { API_URL, loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
+import { loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
 import { InventoryTable } from './components/InventoryTable';
-import { PortfolioDashboard, PortfolioSummary, PortfolioHoldings } from './components/PortfolioDashboard';
+import { PortfolioDashboard } from './components/PortfolioDashboard';
 import { AddAssetForm } from './components/AddAssetForm';
 import { DataManagement } from './components/DataManagement';
 import { round, formatCurrency, formatUnit } from './utils';
@@ -26,13 +26,13 @@ const TYPE_DOT_CLASS: Record<string, string> = {
   [AssetType.CRYPTO]: 'type-dot-crypto',
 };
 
-type ViewState = 'HOME' | 'TYPE_LIST' | 'ASSET_DETAIL';
+type ViewState = 'HOME' | 'ASSET_DETAIL';
 
 function App() {
   const [view, setView] = useState<ViewState>('HOME');
-  const [selectedType, setSelectedType] = useState<AssetType | null>(null);
   const [selectedAssetId, setSelectedAssetId] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger' | 'inventory'>('dashboard');
+  const [expandedTypes, setExpandedTypes] = useState<Set<AssetType>>(new Set(ASSET_TYPES));
 
   // Data State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -43,7 +43,11 @@ function App() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
+  // Modals
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
+  const [addAssetType, setAddAssetType] = useState<AssetType>(AssetType.STOCK);
+  const [showQuickTrade, setShowQuickTrade] = useState(false);
+  const [quickTradeAssetId, setQuickTradeAssetId] = useState<string>('');
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   useEffect(() => {
@@ -100,7 +104,8 @@ function App() {
     }
   }, [assets, transactions, dataSource]);
 
-  const goldenTestResult = useMemo(() => runGoldenTest(), []);
+  // Engine self-test (runs once, result logged to console)
+  useMemo(() => runGoldenTest(), []);
 
   const inventoryState = useMemo(() => {
     const map: Record<string, InventoryState[]> = {};
@@ -137,31 +142,47 @@ function App() {
   }, [portfolioPositions]);
 
   // --- Handlers ---
-  const handleSelectType = (type: AssetType) => {
-    setSelectedType(type);
-    setView('TYPE_LIST');
-    setSelectedAssetId('');
-    setEditingTransaction(null);
-  };
-
   const handleSelectAsset = (assetId: string) => {
-    setSelectedAssetId(assetId);
-    setView('ASSET_DETAIL');
-    setActiveTab('dashboard');
-    setEditingTransaction(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const asset = assets.find(a => a.id === assetId);
+    if (asset) {
+      setSelectedAssetId(assetId);
+      setView('ASSET_DETAIL');
+      setActiveTab('dashboard');
+      setEditingTransaction(null);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
   };
 
   const handleBackToHome = () => {
     setView('HOME');
-    setSelectedType(null);
     setSelectedAssetId('');
     setEditingTransaction(null);
   };
 
-  const handleBackToTypeList = () => {
-    setView('TYPE_LIST');
-    setSelectedAssetId('');
+  const handleToggleType = (type: AssetType) => {
+    setExpandedTypes(prev => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  };
+
+  // Quick Trade: open from FAB or from asset detail
+  const handleOpenQuickTrade = (assetId?: string) => {
+    setQuickTradeAssetId(assetId || assets[0]?.id || '');
+    setEditingTransaction(null);
+    setShowQuickTrade(true);
+  };
+
+  const handleEditTransaction = (tx: Transaction) => {
+    setEditingTransaction(tx);
+    setQuickTradeAssetId(tx.assetId);
+    setShowQuickTrade(true);
+  };
+
+  const handleCloseQuickTrade = () => {
+    setShowQuickTrade(false);
     setEditingTransaction(null);
   };
 
@@ -170,6 +191,7 @@ function App() {
       const newTx = { assetId, date, type, quantity, pricePerUnit: price, fees, totalAmount: round(quantity * price + (type === TransactionType.BUY ? fees : -fees), 2) };
       const created = await createTransaction(newTx);
       setTransactions(prev => [...prev, created]);
+      setShowQuickTrade(false);
     } catch (e) {
       console.error("Failed to create transaction", e);
       alert("Failed to create transaction");
@@ -182,6 +204,7 @@ function App() {
       const updated = await updateTransaction(id, updates);
       setTransactions(prev => prev.map(tx => tx.id === id ? updated : tx));
       setEditingTransaction(null);
+      setShowQuickTrade(false);
     } catch (e) {
       console.error("Failed to update transaction", e);
       alert("Failed to update transaction");
@@ -211,10 +234,14 @@ function App() {
     }
   };
 
+  const handleOpenAddAsset = (type: AssetType) => {
+    setAddAssetType(type);
+    setShowAddAssetModal(true);
+  };
+
   const handleSaveNewAsset = async (symbol: string, name: string, currency: string, method: AccountingMethod) => {
     try {
-      if (!selectedType) return;
-      const newAsset = { symbol, name, type: selectedType, method, currency, currentMarketPrice: 0 };
+      const newAsset = { symbol, name, type: addAssetType, method, currency, currentMarketPrice: 0 };
       const created = await createAsset(newAsset);
       setAssets(prev => [...prev, created]);
       setShowAddAssetModal(false);
@@ -229,19 +256,14 @@ function App() {
       await deleteAsset(assetId);
       setAssets(prev => prev.filter(a => a.id !== assetId));
       setTransactions(prev => prev.filter(tx => tx.assetId !== assetId));
+      if (selectedAssetId === assetId) {
+        handleBackToHome();
+      }
     } catch (e) {
       console.error("Failed to delete asset", e);
       alert("Failed to delete asset");
     }
   };
-
-  const handleEditClick = (tx: Transaction) => {
-    setEditingTransaction(tx);
-    setActiveTab('ledger');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  const handleCancelEdit = () => { setEditingTransaction(null); };
 
   const handleDataImport = (newAssets: Asset[], newTransactions: Transaction[]) => {
     setAssets(newAssets);
@@ -264,10 +286,9 @@ function App() {
   };
 
   // --- Derived Data ---
-  const typePositions = selectedType ? portfolioPositions.filter(p => p.asset.type === selectedType) : [];
   const currentAssetPosition = selectedAssetId ? portfolioPositions.find(p => p.asset.id === selectedAssetId) : null;
   const currentAssetTransactions = selectedAssetId ? transactions.filter(t => t.assetId === selectedAssetId) : [];
-  const currentAssetInventory = selectedAssetId ? inventoryState[selectedAssetId] : [];
+  const currentAssetInventory = selectedAssetId ? inventoryState[selectedAssetId] || [] : [];
 
   // --- Total Portfolio ---
   const totalValue = portfolioPositions.reduce((s, p) => s + p.marketValue, 0);
@@ -276,7 +297,7 @@ function App() {
   const totalReturn = totalCost > 0 ? totalPnl / totalCost : 0;
 
   return (
-    <div className="min-h-screen min-h-[100dvh] pb-6">
+    <div className="min-h-screen min-h-[100dvh] pb-24">
       {/* Ambient Glow */}
       <div className="ambient-glow" />
 
@@ -291,9 +312,9 @@ function App() {
             {isRefreshing && (
               <div className="w-4 h-4 border-2 border-transparent border-t-[var(--accent-blue)] rounded-full animate-spin" />
             )}
-            {view !== 'HOME' && (
+            {view === 'ASSET_DETAIL' && (
               <button
-                onClick={view === 'ASSET_DETAIL' ? handleBackToTypeList : handleBackToHome}
+                onClick={handleBackToHome}
                 className="flex items-center gap-1 text-[13px] font-medium"
                 style={{ color: 'var(--accent-blue)' }}
               >
@@ -305,9 +326,40 @@ function App() {
         </div>
       </header>
 
-      {/* Modal */}
-      {showAddAssetModal && selectedType && (
-        <AddAssetForm type={selectedType} onSave={handleSaveNewAsset} onCancel={() => setShowAddAssetModal(false)} />
+      {/* Add Asset Modal */}
+      {showAddAssetModal && (
+        <AddAssetForm type={addAssetType} onSave={handleSaveNewAsset} onCancel={() => setShowAddAssetModal(false)} />
+      )}
+
+      {/* ===== QUICK TRADE BOTTOM SHEET ===== */}
+      {showQuickTrade && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center animate-fade-in" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }} onClick={(e) => { if (e.target === e.currentTarget) handleCloseQuickTrade(); }}>
+          <div className="w-full max-w-md glass-elevated overflow-hidden animate-slide-up m-0 sm:m-4" style={{ borderRadius: 'var(--radius-xl) var(--radius-xl) 0 0', maxHeight: '90dvh', overflowY: 'auto' }}>
+            {/* Handle bar for mobile */}
+            <div className="flex justify-center pt-3 pb-1 sm:hidden">
+              <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border-glass-strong)' }} />
+            </div>
+            <div className="px-5 pt-3 pb-2 flex justify-between items-center">
+              <h3 className="text-[17px] font-semibold" style={{ color: 'var(--text-primary)' }}>
+                {editingTransaction ? 'Edit Transaction' : 'Quick Trade'}
+              </h3>
+              <button onClick={handleCloseQuickTrade} className="w-8 h-8 rounded-full flex items-center justify-center transition-colors" style={{ background: 'var(--bg-glass-elevated)', color: 'var(--text-tertiary)' }}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            <div className="px-5 pb-5">
+              <TransactionForm
+                assets={assets}
+                initialAssetId={quickTradeAssetId}
+                initialData={editingTransaction}
+                onAddTransaction={handleAddTransaction}
+                onUpdateTransaction={handleUpdateTransaction}
+                onCancel={handleCloseQuickTrade}
+                showAssetPicker={!editingTransaction && view === 'HOME'}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       <main className="relative z-10 max-w-lg mx-auto px-4 main-content pb-8">
@@ -332,7 +384,7 @@ function App() {
           </div>
         )}
 
-        {/* ===== VIEW 1: HOME ===== */}
+        {/* ===== HOME VIEW: Flat layout with grouped assets ===== */}
         {view === 'HOME' && !(isLoading && dataSource === 'none') && (
           <div className="space-y-5 animate-fade-in">
             {/* Hero Summary */}
@@ -359,117 +411,123 @@ function App() {
               onReset={handleDataReset}
             />
 
-            {/* Asset Type Cards */}
-            <div className="grid grid-cols-2 gap-3 stagger-children">
-              {ASSET_TYPES.map(type => {
-                const stat = statsByType[type];
-                const isPositive = stat.pnl >= 0;
-                return (
+            {/* Asset Groups by Type — flat, expandable */}
+            {ASSET_TYPES.map(type => {
+              const stat = statsByType[type];
+              const isExpanded = expandedTypes.has(type);
+              const typeAssets = portfolioPositions.filter(p => p.asset.type === type);
+
+              return (
+                <div key={type} className="space-y-2">
+                  {/* Type Header — tap to expand/collapse */}
                   <button
-                    key={type}
-                    onClick={() => handleSelectType(type)}
-                    className="glass text-left p-4 transition-all duration-300 active:scale-[0.97]"
-                    style={{ borderRadius: 'var(--radius-lg)' }}
+                    onClick={() => handleToggleType(type)}
+                    className="w-full flex items-center justify-between px-1 py-2 transition-all active:opacity-80"
                   >
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5">
                       <span className="text-[18px]">{TYPE_ICONS[type]}</span>
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'var(--bg-glass-elevated)', color: 'var(--text-tertiary)' }}>
-                        {stat.count}
+                      <span className="text-[14px] font-semibold" style={{ color: 'var(--text-primary)' }}>{type}</span>
+                      <span className="text-[11px] font-mono" style={{ color: 'var(--text-tertiary)' }}>
+                        {stat.count} asset{stat.count !== 1 ? 's' : ''}
                       </span>
                     </div>
-                    <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--text-tertiary)' }}>{type}</div>
-                    <div className="text-[17px] font-bold font-mono tracking-tight" style={{ color: 'var(--text-primary)' }}>
-                      {formatCurrency(stat.value)}
-                    </div>
-                    <div className="text-[11px] font-mono mt-1.5" style={{ color: isPositive ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                      {isPositive ? '+' : ''}{formatCurrency(stat.pnl)}
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className="text-[14px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(stat.value)}</div>
+                        <div className="text-[10px] font-mono" style={{ color: stat.pnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                          {stat.pnl > 0 ? '+' : ''}{formatCurrency(stat.pnl)}
+                        </div>
+                      </div>
+                      <svg
+                        className="w-4 h-4 transition-transform duration-200"
+                        style={{ color: 'var(--text-quaternary)', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
                     </div>
                   </button>
-                );
-              })}
-            </div>
 
-            {/* Holdings List */}
-            <PortfolioHoldings positions={portfolioPositions} />
-          </div>
-        )}
+                  {/* Expanded: asset list */}
+                  {isExpanded && (
+                    <div className="space-y-2 stagger-children">
+                      {typeAssets.map(pos => (
+                        <div
+                          key={pos.asset.id}
+                          className="glass flex items-center gap-3 p-4 transition-all duration-300 active:scale-[0.98] cursor-pointer"
+                          onClick={() => handleSelectAsset(pos.asset.id)}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <span className={`type-dot ${TYPE_DOT_CLASS[pos.asset.type]}`} />
+                              <span className="text-[14px] font-semibold" style={{ color: 'var(--text-primary)' }}>{pos.asset.symbol}</span>
+                              <span className="text-[11px] truncate" style={{ color: 'var(--text-tertiary)' }}>{pos.asset.name}</span>
+                            </div>
+                            <div className="text-[11px] font-mono ml-[18px]" style={{ color: 'var(--text-secondary)' }}>
+                              {formatUnit(pos.units)} units · {pos.asset.currency}
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className="text-[14px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue)}</div>
+                            <div className="flex items-center justify-end gap-1.5 mt-0.5">
+                              <span className="text-[10px] font-mono" style={{ color: pos.unrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
+                                {pos.unrealizedPnl > 0 ? '+' : ''}{formatCurrency(pos.unrealizedPnl)}
+                              </span>
+                              <span className={pos.returnPercentage >= 0 ? 'badge-green' : 'badge-red'} style={{ fontSize: '9px', padding: '1px 5px' }}>
+                                {(pos.returnPercentage * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                          </div>
+                          {/* Quick trade shortcut */}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleOpenQuickTrade(pos.asset.id); }}
+                            className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
+                            style={{ background: 'rgba(100,210,255,0.1)', border: '1px solid rgba(100,210,255,0.2)' }}
+                            title="Quick trade"
+                          >
+                            <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
 
-        {/* ===== VIEW 2: TYPE LIST ===== */}
-        {view === 'TYPE_LIST' && selectedType && (
-          <div className="space-y-5 animate-slide-up">
-            {/* Type Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span className="text-[26px]">{TYPE_ICONS[selectedType]}</span>
-                <div>
-                  <h2 className="text-[22px] font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>{selectedType}</h2>
-                  <p className="text-[11px] font-medium" style={{ color: 'var(--text-tertiary)' }}>{typePositions.length} assets</p>
+                      {/* Add asset button inline */}
+                      <button
+                        onClick={() => handleOpenAddAsset(type)}
+                        className="w-full glass p-3 flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                        style={{ borderStyle: 'dashed', borderColor: 'var(--border-glass)' }}
+                      >
+                        <svg className="w-4 h-4" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
+                        <span className="text-[11px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>Add {type}</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-              <button
-                onClick={() => setShowAddAssetModal(true)}
-                className="glass-btn-primary glass-btn flex items-center gap-1.5"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add
-              </button>
-            </div>
-
-            {/* Type Summary */}
-            <PortfolioSummary positions={typePositions} />
-
-            {/* Asset Cards */}
-            <div className="space-y-3 stagger-children">
-              {typePositions.map(pos => (
-                <button
-                  key={pos.asset.id}
-                  onClick={() => handleSelectAsset(pos.asset.id)}
-                  className="glass w-full text-left p-4 transition-all duration-300 active:scale-[0.98] flex items-center gap-4"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className={`type-dot ${TYPE_DOT_CLASS[pos.asset.type]}`} />
-                      <span className="text-[15px] font-semibold" style={{ color: 'var(--text-primary)' }}>{pos.asset.symbol}</span>
-                      <span className="text-[11px] truncate" style={{ color: 'var(--text-tertiary)' }}>{pos.asset.name}</span>
-                    </div>
-                    <div className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>
-                      {formatUnit(pos.units)} units · {pos.asset.currency}
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-[15px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue)}</div>
-                    <div className="text-[11px] font-mono" style={{ color: pos.returnPercentage >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>
-                      {(pos.returnPercentage * 100).toFixed(2)}%
-                    </div>
-                  </div>
-                  <svg className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                </button>
-              ))}
-
-              {typePositions.length === 0 && (
-                <button
-                  onClick={() => setShowAddAssetModal(true)}
-                  className="glass w-full p-8 flex flex-col items-center gap-2 transition-all active:scale-[0.98]"
-                  style={{ borderStyle: 'dashed' }}
-                >
-                  <svg className="w-6 h-6" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
-                  <span className="text-[12px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>Start tracking {selectedType}</span>
-                </button>
-              )}
-            </div>
+              );
+            })}
           </div>
         )}
 
-        {/* ===== VIEW 3: ASSET DETAIL ===== */}
+        {/* ===== ASSET DETAIL VIEW ===== */}
         {view === 'ASSET_DETAIL' && currentAssetPosition && (
           <div className="space-y-5 animate-slide-up">
             {/* Asset Header */}
             <div className="glass-elevated p-5">
-              <div className="flex items-center gap-2 mb-3">
-                <span className={`type-dot ${TYPE_DOT_CLASS[currentAssetPosition.asset.type]}`} />
-                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
-                  {currentAssetPosition.asset.type} · {currentAssetPosition.asset.method} · {currentAssetPosition.asset.currency}
-                </span>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`type-dot ${TYPE_DOT_CLASS[currentAssetPosition.asset.type]}`} />
+                  <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
+                    {currentAssetPosition.asset.type} · {currentAssetPosition.asset.method} · {currentAssetPosition.asset.currency}
+                  </span>
+                </div>
+                <button
+                  onClick={() => { if (confirm(`Delete ${currentAssetPosition.asset.symbol} and all its transactions?`)) handleDeleteAsset(currentAssetPosition.asset.id); }}
+                  className="text-[11px] font-semibold transition-opacity active:opacity-60"
+                  style={{ color: 'var(--accent-red)' }}
+                >
+                  Delete
+                </button>
               </div>
               <h2 className="text-[26px] font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>
                 {currentAssetPosition.asset.symbol}
@@ -515,16 +573,9 @@ function App() {
 
               {activeTab === 'ledger' && (
                 <div className="space-y-5 animate-fade-in">
-                  <TransactionForm
-                    assets={[currentAssetPosition.asset]}
-                    onAddTransaction={handleAddTransaction}
-                    onUpdateTransaction={handleUpdateTransaction}
-                    initialData={editingTransaction}
-                    onCancel={handleCancelEdit}
-                  />
                   <LedgerTable
                     transactions={currentAssetTransactions}
-                    onEdit={handleEditClick}
+                    onEdit={handleEditTransaction}
                     onDelete={handleDeleteTransaction}
                   />
                 </div>
@@ -539,6 +590,31 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* ===== FLOATING ACTION BUTTON ===== */}
+      {!(isLoading && dataSource === 'none') && !showQuickTrade && !showAddAssetModal && assets.length > 0 && (
+        <button
+          onClick={() => handleOpenQuickTrade(selectedAssetId || undefined)}
+          className="fixed z-40 flex items-center justify-center transition-all duration-200 active:scale-90"
+          style={{
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)',
+            right: '24px',
+            width: '56px',
+            height: '56px',
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(100,210,255,0.3), rgba(125,122,255,0.3))',
+            border: '1px solid rgba(100,210,255,0.4)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            boxShadow: '0 8px 32px rgba(100,210,255,0.2), 0 0 0 0.5px rgba(255,255,255,0.1) inset',
+          }}
+          title="Quick Trade"
+        >
+          <svg className="w-6 h-6" style={{ color: 'var(--accent-blue)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
