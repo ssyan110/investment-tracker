@@ -53,7 +53,7 @@ export const TransactionForm: React.FC<TransactionFormProps> = ({
   const selectedAsset = assets.find(a => a.id === assetId);
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-3">
+    <form onSubmit={handleSubmit} className="space-y-3 overflow-hidden">
       {showAssetPicker && assets.length > 1 && (
         <div>
           <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5 ml-1" style={{ color: 'var(--text-tertiary)' }}>Asset</label>

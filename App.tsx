@@ -430,8 +430,8 @@ function App() {
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center animate-fade-in"
           style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)' }}
           onClick={e => { if (e.target === e.currentTarget) handleCloseQuickTrade(); }}>
-          <div className="w-full max-w-md glass-elevated overflow-hidden animate-slide-up sm:m-4 bottom-sheet-radius"
-            style={{ maxHeight: '85dvh', overflowY: 'auto' }}>
+          <div className="w-full max-w-md mx-2 sm:mx-auto glass-elevated overflow-hidden animate-slide-up sm:m-4 bottom-sheet-radius"
+            style={{ maxHeight: '85dvh', overflowY: 'auto', overflowX: 'hidden' }}>
             <div className="flex justify-center pt-3 pb-1 sm:hidden">
               <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border-glass-strong)' }} />
             </div>
@@ -443,7 +443,7 @@ function App() {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-            <div className="px-5 pb-6 pt-1">
+            <div className="px-5 pb-6 pt-1 overflow-x-hidden">
               <TransactionForm assets={assets} initialAssetId={quickTradeAssetId} initialData={editingTransaction} isSaving={isSaving}
                 onAddTransaction={handleAddTransaction} onUpdateTransaction={handleUpdateTransaction} onCancel={handleCloseQuickTrade}
                 showAssetPicker={!editingTransaction && view === 'HOME'} />
