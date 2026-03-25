@@ -1,10 +1,15 @@
 import React from 'react';
-import { PortfolioPosition } from '../types';
+import { PortfolioPosition, AllocationDataPoint, PnlDataPoint } from '../types';
 import { formatCurrency, formatUnit } from '../utils';
+import { AllocationChart } from './AllocationChart';
+import { PnlBarChart } from './PnlBarChart';
 
 interface PortfolioDashboardProps {
   positions: PortfolioPosition[];
   hideCostBasis?: boolean;
+  allocationData?: AllocationDataPoint[];
+  pnlData?: PnlDataPoint[];
+  totalValue?: number;
 }
 
 export const PortfolioSummary: React.FC<PortfolioDashboardProps> = ({ positions, hideCostBasis = false }) => {
@@ -87,10 +92,24 @@ export const PortfolioHoldings: React.FC<{ positions: PortfolioPosition[] }> = (
 };
 
 export const PortfolioDashboard: React.FC<PortfolioDashboardProps> = (props) => {
+  const { positions, allocationData, pnlData, totalValue } = props;
+
   return (
     <div className="space-y-4">
       <PortfolioSummary {...props} />
-      <PortfolioHoldings positions={props.positions} />
+      <PortfolioHoldings positions={positions} />
+      {allocationData && allocationData.length > 0 && (
+        <div className="glass p-4">
+          <h3 className="text-[15px] font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Allocation</h3>
+          <AllocationChart data={allocationData} totalValue={totalValue ?? 0} />
+        </div>
+      )}
+      {pnlData && pnlData.length > 0 && (
+        <div className="glass p-4">
+          <h3 className="text-[15px] font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>P&L by Asset</h3>
+          <PnlBarChart data={pnlData} />
+        </div>
+      )}
     </div>
   );
 };

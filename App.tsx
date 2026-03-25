@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod } from './types';
+import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod, TimeRange } from './types';
 import { calculateInventoryState } from './engine';
+import { computePortfolioTimeSeries, filterByTimeRange, computeAllocationBreakdown, computePnlByAsset, computeSparklineData, computeAssetTimeSeries } from './chartEngine';
 import { loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
@@ -10,6 +11,11 @@ import { AddAssetForm } from './components/AddAssetForm';
 import { DataManagement } from './components/DataManagement';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { ConfirmModal } from './components/ConfirmModal';
+import { HeroSection } from './components/HeroSection';
+import { Sparkline } from './components/Sparkline';
+import { AssetPerformanceChart } from './components/AssetPerformanceChart';
+import { AllocationChart } from './components/AllocationChart';
+import { PnlBarChart } from './components/PnlBarChart';
 import { round, formatCurrency, formatUnit } from './utils';
 
 const ASSET_TYPES = [AssetType.GOLD, AssetType.ETF, AssetType.STOCK, AssetType.CRYPTO];
@@ -25,6 +31,8 @@ function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'ledger' | 'inventory'>('dashboard');
   const [expandedTypes, setExpandedTypes] = useState<Set<AssetType>>(new Set(ASSET_TYPES));
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedRange, setSelectedRange] = useState<TimeRange>('ALL');
+  const [assetRange, setAssetRange] = useState<TimeRange>('ALL');
 
   // Data
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -171,6 +179,17 @@ function App() {
       return { asset, units, avgCost, investmentAmount, marketPrice, marketValue, unrealizedPnl, returnPercentage };
     });
   }, [inventoryState, assets]);
+
+  const portfolioTimeSeries = useMemo(() => computePortfolioTimeSeries(transactions, assets), [transactions, assets]);
+  const filteredTimeSeries = useMemo(() => filterByTimeRange(portfolioTimeSeries, selectedRange), [portfolioTimeSeries, selectedRange]);
+  const allocationData = useMemo(() => computeAllocationBreakdown(portfolioPositions), [portfolioPositions]);
+  const pnlData = useMemo(() => computePnlByAsset(portfolioPositions), [portfolioPositions]);
+
+  const assetTimeSeries = useMemo(() =>
+    selectedAssetId ? computeAssetTimeSeries(transactions, assets.find(a => a.id === selectedAssetId)!) : [],
+    [transactions, assets, selectedAssetId]
+  );
+  const filteredAssetTimeSeries = useMemo(() => filterByTimeRange(assetTimeSeries, assetRange), [assetTimeSeries, assetRange]);
 
   const statsByType = useMemo(() => {
     const stats: Record<string, { value: number; cost: number; pnl: number; count: number }> = {};
@@ -526,16 +545,29 @@ function App() {
           {view === 'HOME' && !(isLoading && dataSource === 'none') && (
             <div className="space-y-5 animate-fade-in">
               {/* Hero */}
-              <div className="glass-elevated p-5">
-                <div className="text-[11px] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--text-tertiary)' }}>Total Portfolio</div>
-                <div className="text-[32px] font-bold font-mono tracking-tight leading-tight" style={{ color: 'var(--text-primary)' }}>{formatCurrency(totalValue)}</div>
-                <div className="flex items-center gap-2 mt-2">
-                  <span className={totalPnl >= 0 ? 'badge-green' : 'badge-red'}>{totalPnl > 0 ? '+' : ''}{formatCurrency(totalPnl)}</span>
-                  <span className="text-[12px] font-mono" style={{ color: totalReturn >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>{(totalReturn * 100).toFixed(2)}%</span>
-                </div>
-              </div>
+              <HeroSection
+                totalValue={totalValue}
+                totalPnl={totalPnl}
+                totalReturn={totalReturn}
+                chartData={filteredTimeSeries}
+                selectedRange={selectedRange}
+                onRangeChange={setSelectedRange}
+              />
 
               <DataManagement currentAssets={assets} currentTransactions={transactions} onImport={handleDataImport} onReset={handleDataReset} onRequestConfirm={requestConfirm} onToast={toast} />
+
+              {allocationData.length > 0 && (
+                <div className="glass p-4">
+                  <h3 className="text-[15px] font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Allocation</h3>
+                  <AllocationChart data={allocationData} totalValue={totalValue} />
+                </div>
+              )}
+              {pnlData.length > 0 && (
+                <div className="glass p-4">
+                  <h3 className="text-[15px] font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>P&L by Asset</h3>
+                  <PnlBarChart data={pnlData} />
+                </div>
+              )}
 
               {/* Mobile search */}
               <div className="sm:hidden relative">
@@ -573,7 +605,9 @@ function App() {
 
                     {isExpanded && (
                       <div className="space-y-2 stagger-children">
-                        {typeAssets.map(pos => (
+                        {typeAssets.map(pos => {
+                          const sparkData = computeSparklineData(transactions, pos.asset);
+                          return (
                           <div key={pos.asset.id} className="glass flex items-center gap-3 p-4 transition-all duration-300 active:scale-[0.98] cursor-pointer" onClick={() => handleSelectAsset(pos.asset.id)}>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-0.5">
@@ -583,6 +617,9 @@ function App() {
                               </div>
                               <div className="text-[11px] font-mono ml-[18px]" style={{ color: 'var(--text-secondary)' }}>{formatUnit(pos.units)} units · {pos.asset.currency}</div>
                             </div>
+                            {sparkData.length >= 2 && (
+                              <Sparkline data={sparkData} positive={pos.unrealizedPnl >= 0} />
+                            )}
                             <div className="text-right flex-shrink-0">
                               <div className="text-[14px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue, pos.asset.currency)}</div>
                               <div className="flex items-center justify-end gap-1.5 mt-0.5">
@@ -596,7 +633,7 @@ function App() {
                               <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                             </button>
                           </div>
-                        ))}
+                        )})}
                         <button onClick={() => handleOpenAddAsset(type)} className="w-full glass p-3 flex items-center justify-center gap-2 transition-all active:scale-[0.98]" style={{ borderStyle: 'dashed', borderColor: 'var(--border-glass)' }}>
                           <svg className="w-4 h-4" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" /></svg>
                           <span className="text-[11px] font-semibold" style={{ color: 'var(--text-tertiary)' }}>Add {type}</span>
@@ -648,6 +685,12 @@ function App() {
                 </div>
               </div>
 
+              <AssetPerformanceChart
+                data={filteredAssetTimeSeries}
+                selectedRange={assetRange}
+                onRangeChange={setAssetRange}
+              />
+
               {/* Tabs */}
               <div className="segmented-control w-full flex">
                 {(['dashboard', 'ledger', 'inventory'] as const).map(tab => (
@@ -658,7 +701,7 @@ function App() {
               </div>
 
               <div className="min-h-[300px]">
-                {activeTab === 'dashboard' && <div className="animate-fade-in"><PortfolioDashboard positions={[currentAssetPosition]} /></div>}
+                {activeTab === 'dashboard' && <div className="animate-fade-in"><PortfolioDashboard positions={[currentAssetPosition]} allocationData={allocationData} pnlData={pnlData} totalValue={totalValue} /></div>}
                 {activeTab === 'ledger' && (
                   <div className="space-y-5 animate-fade-in">
                     <LedgerTable transactions={currentAssetTransactions} currency={currentAssetPosition.asset.currency} onEdit={handleEditTransaction} onDelete={handleDeleteTransaction} />

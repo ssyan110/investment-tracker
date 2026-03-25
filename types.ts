@@ -67,3 +67,36 @@ export interface PortfolioPosition {
   unrealizedPnl: number; // B - A
   returnPercentage: number; // (B - A) / A
 }
+
+// Chart Data Models
+
+/** A single point on the portfolio value time series */
+export interface PortfolioTimeSeriesPoint {
+  date: string;
+  value: number;
+}
+
+/** A slice of the allocation donut chart */
+export interface AllocationDataPoint {
+  type: AssetType;
+  value: number;
+  percentage: number;
+}
+
+/** A single point on an individual asset's performance chart */
+export interface AssetTimeSeriesPoint {
+  date: string;
+  marketValue: number;
+  costBasis: number;
+}
+
+/** A single bar in the P&L bar chart */
+export interface PnlDataPoint {
+  symbol: string;
+  name: string;
+  pnl: number;
+  returnPct: number;
+}
+
+/** Time range options for chart filtering */
+export type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
