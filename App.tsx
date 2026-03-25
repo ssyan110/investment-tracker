@@ -19,6 +19,9 @@ const TYPE_ICONS: Record<string, string> = { [AssetType.GOLD]: '🥇', [AssetTyp
 const TYPE_DOT_CLASS: Record<string, string> = { [AssetType.GOLD]: 'type-dot-gold', [AssetType.ETF]: 'type-dot-etf', [AssetType.STOCK]: 'type-dot-stock', [AssetType.CRYPTO]: 'type-dot-crypto' };
 
 type ViewState = 'HOME' | 'ASSET_DETAIL';
+type SortKey = 'value' | 'pnl' | 'pnlPct' | 'name';
+const SORT_LABELS: Record<SortKey, string> = { value: 'Value', pnl: 'P&L', pnlPct: 'Return %', name: 'Name' };
+const SORT_KEYS: SortKey[] = ['value', 'pnl', 'pnlPct', 'name'];
 
 function App() {
   // View
@@ -28,6 +31,7 @@ function App() {
   const [expandedTypes, setExpandedTypes] = useState<Set<AssetType>>(new Set(ASSET_TYPES));
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRange, setSelectedRange] = useState<TimeRange>('ALL');
+  const [sortKey, setSortKey] = useState<SortKey>('value');
 
   // Data
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -196,6 +200,17 @@ function App() {
     const q = searchQuery.toLowerCase();
     return portfolioPositions.filter(p => p.asset.symbol.toLowerCase().includes(q) || p.asset.name.toLowerCase().includes(q));
   }, [portfolioPositions, searchQuery]);
+
+  const sortedPositions = useMemo(() => {
+    const sorted = [...filteredPositions];
+    switch (sortKey) {
+      case 'value': return sorted.sort((a, b) => b.marketValue - a.marketValue);
+      case 'pnl': return sorted.sort((a, b) => b.unrealizedPnl - a.unrealizedPnl);
+      case 'pnlPct': return sorted.sort((a, b) => b.returnPercentage - a.returnPercentage);
+      case 'name': return sorted.sort((a, b) => a.asset.symbol.localeCompare(b.asset.symbol));
+      default: return sorted;
+    }
+  }, [filteredPositions, sortKey]);
 
   // Sync time display
   const syncLabel = useMemo(() => {
@@ -475,7 +490,7 @@ function App() {
 
             {/* Asset tree */}
             {ASSET_TYPES.map(type => {
-              const typeAssets = filteredPositions.filter(p => p.asset.type === type);
+              const typeAssets = sortedPositions.filter(p => p.asset.type === type);
               if (searchQuery && typeAssets.length === 0) return null;
               return (
                 <div key={type}>
@@ -547,19 +562,31 @@ function App() {
 
               <DataManagement currentAssets={assets} currentTransactions={transactions} onImport={handleDataImport} onReset={handleDataReset} onRequestConfirm={requestConfirm} onToast={toast} />
 
-              {/* Mobile search */}
-              <div className="sm:hidden relative">
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <input type="text" placeholder="Search assets…" className="glass-input pl-10 text-[13px]" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+              {/* Mobile search + sort */}
+              <div className="sm:hidden flex gap-2">
+                <div className="relative flex-1">
+                  <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'var(--text-quaternary)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <input type="text" placeholder="Search assets…" className="glass-input pl-10 text-[13px]" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+                </div>
+                <button
+                  onClick={() => setSortKey(prev => SORT_KEYS[(SORT_KEYS.indexOf(prev) + 1) % SORT_KEYS.length])}
+                  className="glass flex items-center gap-1.5 px-3 flex-shrink-0 transition-all active:scale-95"
+                  title={`Sort by ${SORT_LABELS[sortKey]}`}
+                >
+                  <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
+                  </svg>
+                  <span className="text-[11px] font-semibold" style={{ color: 'var(--text-secondary)' }}>{SORT_LABELS[sortKey]}</span>
+                </button>
               </div>
 
               {/* Asset Groups */}
               {ASSET_TYPES.map(type => {
                 const stat = statsByType[type];
                 const isExpanded = expandedTypes.has(type);
-                const typeAssets = filteredPositions.filter(p => p.asset.type === type);
+                const typeAssets = sortedPositions.filter(p => p.asset.type === type);
                 if (searchQuery && typeAssets.length === 0) return null;
 
                 return (
