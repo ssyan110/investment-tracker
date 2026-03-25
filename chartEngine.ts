@@ -20,6 +20,7 @@ import { round } from './utils';
 /**
  * 3.1 — Replay transaction ledger chronologically, compute cumulative
  * portfolio value at each transaction date.
+ * Always appends a "today" point so the chart extends to the present.
  */
 export const computePortfolioTimeSeries = (
   transactions: Transaction[],
@@ -59,6 +60,14 @@ export const computePortfolioTimeSeries = (
       date: tx.date,
       value: round(totalValue, 2),
     });
+  }
+
+  // Append a "today" point with current portfolio value so the chart
+  // always extends to the present date (important for time-range filtering)
+  const today = new Date().toISOString();
+  const lastPoint = points[points.length - 1];
+  if (lastPoint && lastPoint.date !== today) {
+    points.push({ date: today, value: lastPoint.value });
   }
 
   return points;

@@ -26,12 +26,15 @@ export const PnlBarChart = ({ data }: PnlBarChartProps) => {
   return (
     <div style={{ overflow: 'hidden', width: '100%' }}>
     <ResponsiveContainer width="100%" height={240}>
-      <BarChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 4 }}>
+      <BarChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 24 }}>
         <XAxis
           dataKey="symbol"
-          tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+          interval={0}
+          tick={{ fill: 'var(--text-secondary)', fontSize: 11 }}
           axisLine={false}
           tickLine={false}
+          angle={-35}
+          textAnchor="end"
         />
         <YAxis
           tick={{ fill: 'var(--text-tertiary)', fontSize: 11 }}
