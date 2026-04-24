@@ -28,6 +28,7 @@ export interface Asset {
   method: AccountingMethod;
   currency: string;
   currentMarketPrice?: number; // External input
+  lastPriceFetchedAt?: string; // ISO 8601 timestamp of last price fetch
 }
 
 // 3.1 Transaction Ledger (Immutable)

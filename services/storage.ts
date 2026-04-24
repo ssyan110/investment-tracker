@@ -241,6 +241,9 @@ export const clearData = async () => {
 
 // ===== HELPERS =====
 
+// SQL migration required for auto-price-fetch feature:
+//   ALTER TABLE assets ADD COLUMN last_price_fetched_at timestamptz;
+
 // Convert from DB format (snake_case) to TS format (camelCase)
 const convertAsset = (dbAsset: any): Asset => ({
   id: dbAsset.id,
@@ -249,19 +252,26 @@ const convertAsset = (dbAsset: any): Asset => ({
   type: dbAsset.type,
   method: dbAsset.method,
   currency: dbAsset.currency,
-  currentMarketPrice: dbAsset.current_market_price
+  currentMarketPrice: dbAsset.current_market_price,
+  lastPriceFetchedAt: dbAsset.last_price_fetched_at ?? undefined
 });
 
 const convertAssets = (dbAssets: any[]): Asset[] => dbAssets.map(convertAsset);
 
-const convertAssetToDb = (asset: any) => ({
-  symbol: asset.symbol,
-  name: asset.name,
-  type: asset.type,
-  method: asset.method,
-  currency: asset.currency,
-  current_market_price: asset.currentMarketPrice
-});
+const convertAssetToDb = (asset: any) => {
+  const result: Record<string, any> = {};
+  if (asset.symbol !== undefined) result.symbol = asset.symbol;
+  if (asset.name !== undefined) result.name = asset.name;
+  if (asset.type !== undefined) result.type = asset.type;
+  if (asset.method !== undefined) result.method = asset.method;
+  if (asset.currency !== undefined) result.currency = asset.currency;
+  if (asset.currentMarketPrice !== undefined) result.current_market_price = asset.currentMarketPrice;
+  // last_price_fetched_at: only include if the DB column exists.
+  // If the migration hasn't been run yet, omitting this avoids a 400 error.
+  // Uncomment after running: ALTER TABLE assets ADD COLUMN last_price_fetched_at timestamptz;
+  // if (asset.lastPriceFetchedAt !== undefined) result.last_price_fetched_at = asset.lastPriceFetchedAt;
+  return result;
+};
 
 // Convert from DB format (snake_case) to TS format (camelCase)
 const convertTransaction = (dbTransaction: any): Transaction => ({

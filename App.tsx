@@ -3,6 +3,7 @@ import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetT
 import { calculateInventoryState } from './engine';
 import { computePortfolioTimeSeries, filterByTimeRange, computeAllocationBreakdown, computePnlByAsset } from './chartEngine';
 import { loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
+import { fetchAllPrices, fetchSinglePrice, isPriceStale } from './services/priceFetcher';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
 import { InventoryTable } from './components/InventoryTable';
@@ -42,6 +43,8 @@ function App() {
   const [dataSource, setDataSource] = useState<'none' | 'cache' | 'live'>('none');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastSyncTime, setLastSyncTime] = useState<number | null>(null);
+  const [isFetchingPrices, setIsFetchingPrices] = useState(false);
+  const [fetchingPriceAssetId, setFetchingPriceAssetId] = useState<string | null>(null);
   const hasFetched = useRef(false);
 
   // Modals
@@ -117,6 +120,37 @@ function App() {
       }
     })();
   }, [fetchData]);
+
+  // ===== AUTO-FETCH PRICES ON STARTUP =====
+  const hasAutoFetchedPrices = useRef(false);
+  useEffect(() => {
+    if (hasAutoFetchedPrices.current) return;
+    if (assets.length === 0 || dataSource === 'none') return;
+    hasAutoFetchedPrices.current = true;
+    // Auto-fetch prices in background after data loads
+    (async () => {
+      setIsFetchingPrices(true);
+      try {
+        const summary = await fetchAllPrices(assets);
+        // Re-fetch to get updated prices from DB
+        const result = await loadAll();
+        if (result) {
+          setAssets(result.assets);
+          setTransactions(result.transactions);
+        }
+        if (summary.failed.length === 0 && summary.updated > 0) {
+          toast(`Auto-updated ${summary.updated} prices`, 'success');
+        } else if (summary.updated > 0) {
+          toast(`Updated ${summary.updated} prices, ${summary.failed.length} failed`, 'info');
+        }
+        // Silently ignore if all fail on auto-fetch (don't spam user on startup)
+      } catch (e) {
+        console.warn('Auto price fetch failed:', e);
+      } finally {
+        setIsFetchingPrices(false);
+      }
+    })();
+  }, [assets, dataSource, toast]);
 
   // Sync cache
   useEffect(() => {
@@ -317,7 +351,7 @@ function App() {
     const asset = assets.find(a => a.id === editingPriceId);
     if (!asset) return;
     try {
-      const updated = await updateAsset(editingPriceId, { ...asset, currentMarketPrice: price });
+      const updated = await updateAsset(editingPriceId, { ...asset, currentMarketPrice: price, lastPriceFetchedAt: new Date().toISOString() });
       setAssets(prev => prev.map(a => a.id === editingPriceId ? updated : a));
       setEditingPriceId(null);
       toast('Price updated', 'success');
@@ -328,6 +362,46 @@ function App() {
   };
 
   const handleCancelEditPrice = () => { setEditingPriceId(null); };
+
+  const handleFetchAllPrices = async () => {
+    setIsFetchingPrices(true);
+    try {
+      const summary = await fetchAllPrices(assets);
+      const result = await loadAll();
+      if (result) {
+        setAssets(result.assets);
+        setTransactions(result.transactions);
+      }
+      if (summary.failed.length === 0) {
+        toast(`Updated ${summary.updated} prices`, 'success');
+      } else if (summary.updated > 0) {
+        toast(`Updated ${summary.updated} prices. Failed: ${summary.failed.join(', ')}`, 'info');
+      } else {
+        toast('Could not fetch any prices', 'error');
+      }
+    } catch {
+      toast('Failed to fetch prices. Check your connection.', 'error');
+    } finally {
+      setIsFetchingPrices(false);
+    }
+  };
+
+  const handleFetchSinglePrice = async (asset: Asset) => {
+    setFetchingPriceAssetId(asset.id);
+    try {
+      const result = await fetchSinglePrice(asset);
+      if (result.price !== null) {
+        setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, currentMarketPrice: result.price!, lastPriceFetchedAt: result.timestamp } : a));
+        toast(`${asset.symbol} price updated`, 'success');
+      } else {
+        toast(`Failed to fetch ${asset.symbol}: ${result.error}`, 'error');
+      }
+    } catch {
+      toast(`Failed to fetch price for ${asset.symbol}`, 'error');
+    } finally {
+      setFetchingPriceAssetId(null);
+    }
+  };
 
   const handleOpenAddAsset = (type: AssetType) => { setAddAssetType(type); setShowAddAssetModal(true); };
 
@@ -429,6 +503,17 @@ function App() {
               </div>
             )}
             {isRefreshing && <div className="w-4 h-4 border-2 border-transparent border-t-[var(--accent-blue)] rounded-full animate-spin" />}
+            {/* Fetch Prices button */}
+            <button onClick={handleFetchAllPrices} disabled={isFetchingPrices}
+              className="flex items-center gap-1 text-[12px] font-medium transition-opacity active:opacity-60 disabled:opacity-40"
+              style={{ color: 'var(--accent-green)' }} title="Fetch Prices">
+              {isFetchingPrices ? (
+                <div className="w-4 h-4 border-2 border-transparent border-t-[var(--accent-green)] rounded-full animate-spin" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              )}
+              <span className="hidden sm:inline">{isFetchingPrices ? 'Fetching…' : 'Prices'}</span>
+            </button>
             {/* Refresh button (desktop) */}
             <button onClick={() => fetchData(true).then(() => toast('Refreshed', 'success'))}
               className="hidden sm:flex items-center gap-1 text-[12px] font-medium transition-opacity active:opacity-60"
@@ -621,7 +706,12 @@ function App() {
                               <div className="text-[11px] font-mono ml-[18px]" style={{ color: 'var(--text-secondary)' }}>{formatUnit(pos.units)} units · {pos.asset.currency}</div>
                             </div>
                             <div className="text-right flex-shrink-0">
-                              <div className="text-[14px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue, pos.asset.currency)}</div>
+                              <div className="flex items-center justify-end gap-1">
+                                <div className="text-[14px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>{formatCurrency(pos.marketValue, pos.asset.currency)}</div>
+                                {isPriceStale(pos.asset.lastPriceFetchedAt) && (
+                                  <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: 'var(--accent-orange)' }} title="Price may be stale" />
+                                )}
+                              </div>
                               <div className="flex items-center justify-end gap-1.5 mt-0.5">
                                 <span className="text-[10px] font-mono" style={{ color: pos.unrealizedPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)' }}>{pos.unrealizedPnl > 0 ? '+' : ''}{formatCurrency(pos.unrealizedPnl, pos.asset.currency)}</span>
                                 <span className={pos.returnPercentage >= 0 ? 'badge-green' : 'badge-red'} style={{ fontSize: '9px', padding: '1px 5px' }}>{(pos.returnPercentage * 100).toFixed(1)}%</span>
@@ -675,12 +765,30 @@ function App() {
                       <button onClick={handleCancelEditPrice} className="text-[11px] font-semibold" style={{ color: 'var(--text-quaternary)' }}>✕</button>
                     </>
                   ) : (
-                    <div className="flex-1 text-right cursor-pointer transition-opacity active:opacity-60" onClick={() => handleStartEditPrice(currentAssetPosition.asset.id)}>
+                    <div className="flex-1 text-right cursor-pointer transition-opacity active:opacity-60 flex items-center justify-end gap-2" onClick={() => handleStartEditPrice(currentAssetPosition.asset.id)}>
                       <span className="text-[18px] font-bold font-mono" style={{ color: 'var(--text-primary)' }}>
                         {currentAssetPosition.asset.currentMarketPrice ? formatCurrency(currentAssetPosition.asset.currentMarketPrice, currentAssetPosition.asset.currency) : '—'}
                       </span>
-                      <span className="text-[10px] ml-2" style={{ color: 'var(--text-quaternary)' }}>tap to edit</span>
+                      {isPriceStale(currentAssetPosition.asset.lastPriceFetchedAt) && (
+                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: 'var(--accent-orange)' }} title="Price may be stale" />
+                      )}
+                      <span className="text-[10px]" style={{ color: 'var(--text-quaternary)' }}>tap to edit</span>
                     </div>
+                  )}
+                  {/* Refresh Price button */}
+                  {editingPriceId !== currentAssetPosition.asset.id && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleFetchSinglePrice(currentAssetPosition.asset); }}
+                      disabled={fetchingPriceAssetId === currentAssetPosition.asset.id}
+                      className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-40"
+                      style={{ background: 'rgba(48,209,88,0.1)', border: '1px solid rgba(48,209,88,0.2)' }}
+                      title="Refresh Price">
+                      {fetchingPriceAssetId === currentAssetPosition.asset.id ? (
+                        <div className="w-3.5 h-3.5 border-2 border-transparent border-t-[var(--accent-green)] rounded-full animate-spin" />
+                      ) : (
+                        <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent-green)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                      )}
+                    </button>
                   )}
                 </div>
               </div>
