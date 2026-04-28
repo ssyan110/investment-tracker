@@ -21,7 +21,7 @@ export const ConfirmModal: React.FC<ConfirmModalProps> = ({ title, message, conf
         <button
           onClick={onConfirm}
           className={`glass-btn flex-1 ${danger ? 'glass-btn-danger' : 'glass-btn-primary'}`}
-          style={danger ? { background: 'rgba(255,69,58,0.15)', borderColor: 'rgba(255,69,58,0.3)' } : {}}
+          style={danger ? { background: 'rgba(248,113,113,0.15)', borderColor: 'rgba(248,113,113,0.3)' } : {}}
         >
           {confirmLabel}
         </button>

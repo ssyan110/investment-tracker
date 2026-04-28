@@ -63,7 +63,7 @@ export const LedgerTable: React.FC<LedgerTableProps> = ({ transactions, currency
               style={{
                 background: sortConfig.key === key ? 'var(--bg-glass-elevated)' : 'transparent',
                 color: sortConfig.key === key ? 'var(--accent-blue)' : 'var(--text-tertiary)',
-                border: `1px solid ${sortConfig.key === key ? 'rgba(100,210,255,0.2)' : 'var(--border-glass)'}`,
+                border: `1px solid ${sortConfig.key === key ? 'rgba(56,189,248,0.2)' : 'var(--border-glass)'}`,
               }}>
               {label}{sortConfig.key === key && <span>{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>}
             </button>
@@ -111,8 +111,8 @@ const SwipeCard: React.FC<{
     <div className="relative overflow-hidden" style={{ borderRadius: 'var(--radius-lg)' }}>
       {/* Action buttons behind */}
       <div className="absolute right-0 top-0 bottom-0 flex items-stretch" style={{ zIndex: 0 }}>
-        <button onClick={onEdit} className="w-16 flex items-center justify-center text-[11px] font-semibold" style={{ background: 'rgba(100,210,255,0.2)', color: 'var(--accent-blue)' }}>Edit</button>
-        <button onClick={onDelete} className="w-16 flex items-center justify-center text-[11px] font-semibold" style={{ background: 'rgba(255,69,58,0.2)', color: 'var(--accent-red)' }}>Delete</button>
+        <button onClick={onEdit} className="w-16 flex items-center justify-center text-[11px] font-semibold" style={{ background: 'rgba(56,189,248,0.2)', color: 'var(--accent-blue)' }}>Edit</button>
+        <button onClick={onDelete} className="w-16 flex items-center justify-center text-[11px] font-semibold" style={{ background: 'rgba(248,113,113,0.2)', color: 'var(--accent-red)' }}>Delete</button>
       </div>
       {/* Card */}
       <div
@@ -124,9 +124,9 @@ const SwipeCard: React.FC<{
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
               style={{
-                background: tx.type === TransactionType.BUY ? 'rgba(48,209,88,0.12)' : 'rgba(255,69,58,0.12)',
+                background: tx.type === TransactionType.BUY ? 'rgba(52,211,153,0.12)' : 'rgba(248,113,113,0.12)',
                 color: tx.type === TransactionType.BUY ? 'var(--accent-green)' : 'var(--accent-red)',
-                border: `1px solid ${tx.type === TransactionType.BUY ? 'rgba(48,209,88,0.2)' : 'rgba(255,69,58,0.2)'}`,
+                border: `1px solid ${tx.type === TransactionType.BUY ? 'rgba(52,211,153,0.2)' : 'rgba(248,113,113,0.2)'}`,
               }}>{tx.type}</span>
             <span className="text-[12px] font-mono" style={{ color: 'var(--text-tertiary)' }}>{tx.date}</span>
           </div>

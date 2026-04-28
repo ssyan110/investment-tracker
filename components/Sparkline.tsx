@@ -16,7 +16,7 @@ export const Sparkline = ({
   if (data.length < 2) return null;
 
   const chartData = data.map((value) => ({ value }));
-  const stroke = positive ? '#30D158' : '#FF453A';
+  const stroke = positive ? '#34d399' : '#f87171';
 
   return (
     <LineChart width={width} height={height} data={chartData}>

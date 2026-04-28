@@ -30,7 +30,7 @@ export const PortfolioChart = ({ data, height }: PortfolioChartProps) => {
   const isPositive =
     data.length >= 2 ? data[data.length - 1].value >= data[0].value : true;
 
-  const strokeColor = isPositive ? '#30D158' : '#FF453A';
+  const strokeColor = isPositive ? '#34d399' : '#f87171';
   const fillId = isPositive ? 'areaGradientGreen' : 'areaGradientRed';
   const chartHeight = getChartHeight(height);
 
@@ -39,12 +39,12 @@ export const PortfolioChart = ({ data, height }: PortfolioChartProps) => {
       <AreaChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 4 }}>
         <defs>
           <linearGradient id="areaGradientGreen" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#30D158" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="#30D158" stopOpacity={0} />
+            <stop offset="0%" stopColor="#34d399" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="#34d399" stopOpacity={0} />
           </linearGradient>
           <linearGradient id="areaGradientRed" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#FF453A" stopOpacity={0.28} />
-            <stop offset="100%" stopColor="#FF453A" stopOpacity={0} />
+            <stop offset="0%" stopColor="#f87171" stopOpacity={0.28} />
+            <stop offset="100%" stopColor="#f87171" stopOpacity={0} />
           </linearGradient>
         </defs>
         <XAxis dataKey="date" hide />

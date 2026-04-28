@@ -101,3 +101,14 @@ export interface PnlDataPoint {
 
 /** Time range options for chart filtering */
 export type TimeRange = '1W' | '1M' | '3M' | '6M' | '1Y' | 'ALL';
+
+/** A daily value snapshot recording an asset's price, units, and value at end of day */
+export interface DailySnapshot {
+  id: string;
+  assetId: string;
+  date: string;        // ISO date string (YYYY-MM-DD)
+  marketPrice: number;
+  units: number;
+  marketValue: number;  // units * marketPrice, rounded to 2dp
+  costBasis: number;
+}

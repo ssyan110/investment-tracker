@@ -7,6 +7,9 @@ import {
   computeAssetTimeSeries,
   computePnlByAsset,
   computeSparklineData,
+  snapshotsToPortfolioTimeSeries,
+  snapshotsToAssetTimeSeries,
+  snapshotsToSparklineData,
 } from './chartEngine';
 import {
   Transaction,
@@ -16,6 +19,7 @@ import {
   AccountingMethod,
   PortfolioPosition,
   TimeRange,
+  DailySnapshot,
 } from './types';
 import { round } from './utils';
 
@@ -350,5 +354,115 @@ describe('chartEngine property-based tests', () => {
       ),
       { numRuns: 100 }
     );
+  });
+});
+
+// ─── Unit Tests for Snapshot-Based Chart Functions ───────────────────
+
+describe('snapshotsToPortfolioTimeSeries', () => {
+  it('maps date and value from each snapshot', () => {
+    const input = [
+      { date: '2024-01-01', value: 1000 },
+      { date: '2024-01-02', value: 1050 },
+    ];
+    const result = snapshotsToPortfolioTimeSeries(input);
+    expect(result).toEqual([
+      { date: '2024-01-01', value: 1000 },
+      { date: '2024-01-02', value: 1050 },
+    ]);
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(snapshotsToPortfolioTimeSeries([])).toEqual([]);
+  });
+
+  it('preserves order', () => {
+    const input = [
+      { date: '2024-03-01', value: 300 },
+      { date: '2024-01-01', value: 100 },
+    ];
+    const result = snapshotsToPortfolioTimeSeries(input);
+    expect(result[0].date).toBe('2024-03-01');
+    expect(result[1].date).toBe('2024-01-01');
+  });
+});
+
+describe('snapshotsToAssetTimeSeries', () => {
+  const makeSnapshot = (overrides: Partial<DailySnapshot> = {}): DailySnapshot => ({
+    id: 'snap-1',
+    assetId: 'asset-1',
+    date: '2024-01-01',
+    marketPrice: 100,
+    units: 10,
+    marketValue: 1000,
+    costBasis: 800,
+    ...overrides,
+  });
+
+  it('maps date, marketValue, and costBasis from each snapshot', () => {
+    const input = [
+      makeSnapshot({ date: '2024-01-01', marketValue: 1000, costBasis: 800 }),
+      makeSnapshot({ date: '2024-01-02', marketValue: 1100, costBasis: 800 }),
+    ];
+    const result = snapshotsToAssetTimeSeries(input);
+    expect(result).toEqual([
+      { date: '2024-01-01', marketValue: 1000, costBasis: 800 },
+      { date: '2024-01-02', marketValue: 1100, costBasis: 800 },
+    ]);
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(snapshotsToAssetTimeSeries([])).toEqual([]);
+  });
+
+  it('excludes id, assetId, marketPrice, and units from output', () => {
+    const result = snapshotsToAssetTimeSeries([makeSnapshot()]);
+    const keys = Object.keys(result[0]);
+    expect(keys).toEqual(['date', 'marketValue', 'costBasis']);
+  });
+});
+
+describe('snapshotsToSparklineData', () => {
+  const makeSnapshot = (date: string, marketValue: number): DailySnapshot => ({
+    id: `snap-${date}`,
+    assetId: 'asset-1',
+    date,
+    marketPrice: 100,
+    units: marketValue / 100,
+    marketValue,
+    costBasis: 500,
+  });
+
+  it('extracts last N marketValue entries', () => {
+    const input = [
+      makeSnapshot('2024-01-01', 100),
+      makeSnapshot('2024-01-02', 200),
+      makeSnapshot('2024-01-03', 300),
+      makeSnapshot('2024-01-04', 400),
+      makeSnapshot('2024-01-05', 500),
+    ];
+    expect(snapshotsToSparklineData(input, 3)).toEqual([300, 400, 500]);
+  });
+
+  it('returns all values when pointCount exceeds length', () => {
+    const input = [
+      makeSnapshot('2024-01-01', 100),
+      makeSnapshot('2024-01-02', 200),
+    ];
+    expect(snapshotsToSparklineData(input, 10)).toEqual([100, 200]);
+  });
+
+  it('defaults to 30 points', () => {
+    const input = Array.from({ length: 50 }, (_, i) =>
+      makeSnapshot(`2024-01-${String(i + 1).padStart(2, '0')}`, (i + 1) * 10)
+    );
+    const result = snapshotsToSparklineData(input);
+    expect(result.length).toBe(30);
+    expect(result[0]).toBe(210); // 21st item
+    expect(result[29]).toBe(500); // 50th item
+  });
+
+  it('returns empty array for empty input', () => {
+    expect(snapshotsToSparklineData([])).toEqual([]);
   });
 });

@@ -22,10 +22,10 @@ const ToastItem: React.FC<{ toast: ToastMessage; onDismiss: (id: string) => void
   useEffect(() => { const t = setTimeout(dismiss, 3000); return () => clearTimeout(t); }, [dismiss]);
 
   const c = toast.type === 'success'
-    ? { bg: 'rgba(48,209,88,0.15)', border: 'rgba(48,209,88,0.3)', color: 'var(--accent-green)' }
+    ? { bg: 'rgba(52,211,153,0.15)', border: 'rgba(52,211,153,0.3)', color: 'var(--accent-green)' }
     : toast.type === 'error'
-    ? { bg: 'rgba(255,69,58,0.15)', border: 'rgba(255,69,58,0.3)', color: 'var(--accent-red)' }
-    : { bg: 'rgba(100,210,255,0.15)', border: 'rgba(100,210,255,0.3)', color: 'var(--accent-blue)' };
+    ? { bg: 'rgba(248,113,113,0.15)', border: 'rgba(248,113,113,0.3)', color: 'var(--accent-red)' }
+    : { bg: 'rgba(56,189,248,0.15)', border: 'rgba(56,189,248,0.3)', color: 'var(--accent-blue)' };
 
   return (
     <div

@@ -58,20 +58,20 @@ export const AssetPerformanceChart = ({
             type="monotone"
             dataKey="marketValue"
             name="Market Value"
-            stroke="#5AC8FA"
+            stroke="#38bdf8"
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, strokeWidth: 0, fill: '#5AC8FA' }}
+            activeDot={{ r: 4, strokeWidth: 0, fill: '#38bdf8' }}
           />
           <Line
             type="monotone"
             dataKey="costBasis"
             name="Cost Basis"
-            stroke="#7D7AFF"
+            stroke="#8b5cf6"
             strokeWidth={2}
             strokeDasharray="5 3"
             dot={false}
-            activeDot={{ r: 4, strokeWidth: 0, fill: '#7D7AFF' }}
+            activeDot={{ r: 4, strokeWidth: 0, fill: '#8b5cf6' }}
           />
         </LineChart>
       </ResponsiveContainer>

@@ -57,7 +57,7 @@ export const PnlBarChart = ({ data }: PnlBarChartProps) => {
           {data.map((entry) => (
             <Cell
               key={entry.symbol}
-              fill={entry.pnl >= 0 ? '#30D158' : '#FF453A'}
+              fill={entry.pnl >= 0 ? '#34d399' : '#f87171'}
             />
           ))}
         </Bar>

@@ -8,6 +8,7 @@ import {
   AssetTimeSeriesPoint,
   PnlDataPoint,
   TimeRange,
+  DailySnapshot,
 } from './types';
 import { round } from './utils';
 
@@ -235,4 +236,41 @@ export const computeSparklineData = (
 
   // Take the most recent `pointCount` values
   return values.slice(-pointCount);
+};
+
+/**
+ * 6.1 — Convert portfolio-level snapshots to PortfolioTimeSeriesPoint[].
+ * Each input element's date and value map directly to the output.
+ * Order is preserved.
+ */
+export const snapshotsToPortfolioTimeSeries = (
+  snapshots: { date: string; value: number }[]
+): PortfolioTimeSeriesPoint[] => {
+  return snapshots.map((s) => ({ date: s.date, value: s.value }));
+};
+
+/**
+ * 6.2 — Convert asset-level snapshots to AssetTimeSeriesPoint[].
+ * Each input element's date, marketValue, and costBasis map directly.
+ * Order is preserved.
+ */
+export const snapshotsToAssetTimeSeries = (
+  snapshots: DailySnapshot[]
+): AssetTimeSeriesPoint[] => {
+  return snapshots.map((s) => ({
+    date: s.date,
+    marketValue: s.marketValue,
+    costBasis: s.costBasis,
+  }));
+};
+
+/**
+ * 6.3 — Extract the last N marketValue entries from snapshots as number[].
+ * Default pointCount = 30. Returns values in chronological order.
+ */
+export const snapshotsToSparklineData = (
+  snapshots: DailySnapshot[],
+  pointCount: number = 30
+): number[] => {
+  return snapshots.slice(-pointCount).map((s) => s.marketValue);
 };

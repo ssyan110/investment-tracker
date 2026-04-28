@@ -1,9 +1,10 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod, TimeRange } from './types';
+import { Transaction, TransactionType, InventoryState, PortfolioPosition, AssetType, Asset, AccountingMethod, TimeRange, DailySnapshot } from './types';
 import { calculateInventoryState } from './engine';
-import { computePortfolioTimeSeries, filterByTimeRange, computeAllocationBreakdown, computePnlByAsset } from './chartEngine';
+import { filterByTimeRange, computeAllocationBreakdown, computePnlByAsset, snapshotsToPortfolioTimeSeries, computePortfolioTimeSeries } from './chartEngine';
 import { loadAll, readCache, clearCache, pingBackend, createAsset, createTransaction, updateAsset, updateTransaction, deleteAsset, deleteTransaction } from './services/storage';
 import { fetchAllPrices, fetchSinglePrice, isPriceStale } from './services/priceFetcher';
+import { createTodaySnapshot, createTodaySnapshotsForAll, backfillIfNeeded, recalculateSnapshots, readSnapshotCache, loadPortfolioSnapshots, deleteAssetSnapshots, clearAssetSnapshotCache } from './services/snapshotService';
 import { TransactionForm } from './components/TransactionForm';
 import { LedgerTable } from './components/LedgerTable';
 import { InventoryTable } from './components/InventoryTable';
@@ -46,6 +47,11 @@ function App() {
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
   const [fetchingPriceAssetId, setFetchingPriceAssetId] = useState<string | null>(null);
   const hasFetched = useRef(false);
+
+  // Snapshots
+  const [snapshots, setSnapshots] = useState<DailySnapshot[]>([]);
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const hasRunSnapshotInit = useRef(false);
 
   // Modals
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
@@ -152,6 +158,48 @@ function App() {
     })();
   }, [assets, dataSource, toast]);
 
+  // ===== SNAPSHOT INITIALIZATION =====
+  useEffect(() => {
+    if (hasRunSnapshotInit.current || assets.length === 0) return;
+    hasRunSnapshotInit.current = true;
+
+    (async () => {
+      // 1. Load cached snapshots immediately
+      const cached = readSnapshotCache();
+      if (cached) setSnapshots(cached);
+
+      // 2. Create today's snapshots for all held assets
+      try {
+        await createTodaySnapshotsForAll(assets, transactions);
+      } catch (e) {
+        console.error('Failed to create today snapshots:', e);
+      }
+
+      // 3. Backfill if needed
+      try {
+        setIsBackfilling(true);
+        await backfillIfNeeded(assets, transactions);
+      } catch (e) {
+        console.error('Backfill failed:', e);
+      } finally {
+        setIsBackfilling(false);
+      }
+
+      // 4. Refresh snapshots from Supabase
+      try {
+        const portfolioData = await loadPortfolioSnapshots('1970-01-01', '9999-12-31');
+        setPortfolioSnapshotData(portfolioData);
+        // Update cache with fresh data
+        const freshCache = readSnapshotCache();
+        if (freshCache) {
+          setSnapshots(freshCache);
+        }
+      } catch (e) {
+        console.error('Failed to refresh snapshots from Supabase:', e);
+      }
+    })();
+  }, [assets, transactions]);
+
   // Sync cache
   useEffect(() => {
     if (dataSource !== 'none' && (assets.length > 0 || transactions.length > 0)) {
@@ -213,7 +261,15 @@ function App() {
     });
   }, [inventoryState, assets]);
 
-  const portfolioTimeSeries = useMemo(() => computePortfolioTimeSeries(transactions, assets), [transactions, assets]);
+  const [portfolioSnapshotData, setPortfolioSnapshotData] = useState<{ date: string; value: number }[]>([]);
+
+  const portfolioTimeSeries = useMemo(() => {
+    // Use snapshot data if available, otherwise fall back to transaction-replay
+    if (portfolioSnapshotData.length > 0) {
+      return snapshotsToPortfolioTimeSeries(portfolioSnapshotData);
+    }
+    return computePortfolioTimeSeries(transactions, assets);
+  }, [portfolioSnapshotData, transactions, assets]);
   const filteredTimeSeries = useMemo(() => filterByTimeRange(portfolioTimeSeries, selectedRange), [portfolioTimeSeries, selectedRange]);
   const allocationData = useMemo(() => computeAllocationBreakdown(portfolioPositions), [portfolioPositions]);
   const pnlData = useMemo(() => computePnlByAsset(portfolioPositions), [portfolioPositions]);
@@ -305,6 +361,11 @@ function App() {
       setTransactions(prev => [...prev, created]);
       setShowQuickTrade(false);
       toast('Transaction added', 'success');
+      // Fire-and-forget: recalculate snapshots from the transaction date
+      const affectedAsset = assets.find(a => a.id === assetId);
+      if (affectedAsset) {
+        recalculateSnapshots(affectedAsset, [...transactions, created], date).catch(console.error);
+      }
     } catch (e) {
       console.error('Failed to create transaction', e);
       toast('Failed to create transaction', 'error');
@@ -320,6 +381,12 @@ function App() {
       setEditingTransaction(null);
       setShowQuickTrade(false);
       toast('Transaction updated', 'success');
+      // Fire-and-forget: recalculate snapshots from the transaction date
+      const affectedAsset = assets.find(a => a.id === assetId);
+      if (affectedAsset) {
+        const updatedTransactions = transactions.map(tx => tx.id === id ? updated : tx);
+        recalculateSnapshots(affectedAsset, updatedTransactions, date).catch(console.error);
+      }
     } catch (e) {
       console.error('Failed to update transaction', e);
       toast('Failed to update transaction', 'error');
@@ -327,11 +394,20 @@ function App() {
   };
 
   const handleDeleteTransaction = (id: string) => {
+    const txToDelete = transactions.find(tx => tx.id === id);
     requestConfirm('Delete Transaction', 'This action cannot be undone.', async () => {
       try {
         await deleteTransaction(id);
-        setTransactions(prev => prev.filter(tx => tx.id !== id));
+        const remainingTransactions = transactions.filter(tx => tx.id !== id);
+        setTransactions(remainingTransactions);
         toast('Transaction deleted', 'success');
+        // Fire-and-forget: recalculate snapshots from the deleted transaction's date
+        if (txToDelete) {
+          const affectedAsset = assets.find(a => a.id === txToDelete.assetId);
+          if (affectedAsset) {
+            recalculateSnapshots(affectedAsset, remainingTransactions, txToDelete.date).catch(console.error);
+          }
+        }
       } catch (e) {
         console.error('Failed to delete transaction', e);
         toast('Failed to delete transaction', 'error');
@@ -355,6 +431,8 @@ function App() {
       setAssets(prev => prev.map(a => a.id === editingPriceId ? updated : a));
       setEditingPriceId(null);
       toast('Price updated', 'success');
+      // Fire-and-forget: create today's snapshot with updated price
+      createTodaySnapshot(updated, transactions).catch(console.error);
     } catch (e) {
       console.error('Failed to update price', e);
       toast('Failed to update price', 'error');
@@ -371,6 +449,8 @@ function App() {
       if (result) {
         setAssets(result.assets);
         setTransactions(result.transactions);
+        // Fire-and-forget: create today's snapshots for all assets with updated prices
+        createTodaySnapshotsForAll(result.assets, result.transactions).catch(console.error);
       }
       if (summary.failed.length === 0) {
         toast(`Updated ${summary.updated} prices`, 'success');
@@ -391,8 +471,11 @@ function App() {
     try {
       const result = await fetchSinglePrice(asset);
       if (result.price !== null) {
-        setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, currentMarketPrice: result.price!, lastPriceFetchedAt: result.timestamp } : a));
+        const updatedAsset = { ...asset, currentMarketPrice: result.price!, lastPriceFetchedAt: result.timestamp };
+        setAssets(prev => prev.map(a => a.id === asset.id ? updatedAsset : a));
         toast(`${asset.symbol} price updated`, 'success');
+        // Fire-and-forget: create today's snapshot with updated price
+        createTodaySnapshot(updatedAsset, transactions).catch(console.error);
       } else {
         toast(`Failed to fetch ${asset.symbol}: ${result.error}`, 'error');
       }
@@ -427,6 +510,13 @@ function App() {
         setTransactions(prev => prev.filter(tx => tx.assetId !== assetId));
         if (selectedAssetId === assetId) handleBackToHome();
         toast('Asset deleted', 'success');
+        // Clean up snapshots (fire-and-forget, log and continue)
+        try {
+          await deleteAssetSnapshots(assetId);
+          clearAssetSnapshotCache(assetId);
+        } catch (snapErr) {
+          console.error('Failed to clean up asset snapshots:', snapErr);
+        }
       } catch (e) {
         console.error('Failed to delete asset', e);
         toast('Failed to delete asset', 'error');
@@ -491,8 +581,8 @@ function App() {
       <header className="glass-header fixed top-0 w-full z-50">
         <div className="desktop-header-inner px-4 h-14 flex justify-between items-center">
           <div className="flex items-center gap-2.5 cursor-pointer" onClick={handleBackToHome}>
-            <div className="h-7 w-7 rounded-[10px] bg-gradient-to-br from-yellow-500 to-amber-600 flex items-center justify-center text-[11px] font-bold text-black shadow-lg shadow-amber-500/20">I</div>
-            <span className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--text-primary)' }}>Portfolio</span>
+            <div className="h-7 w-7 rounded-[8px] bg-gradient-to-br from-sky-400 to-blue-500 flex items-center justify-center text-[11px] font-bold text-white shadow-lg shadow-sky-500/20">I</div>
+            <span className="text-[15px] font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Investment Tracker</span>
           </div>
           <div className="flex items-center gap-3">
             {/* Sync indicator */}
@@ -615,7 +705,7 @@ function App() {
         {/* ===== MAIN CONTENT ===== */}
         <main className="desktop-main relative z-10 px-4 pb-8">
           {loadError && (
-            <div className="glass mb-4 px-4 py-3 text-[13px]" style={{ borderColor: 'rgba(255,69,58,0.3)', color: 'var(--accent-red)' }}>{loadError}</div>
+            <div className="glass mb-4 px-4 py-3 text-[13px]" style={{ borderColor: 'rgba(248,113,113,0.3)', color: 'var(--accent-red)' }}>{loadError}</div>
           )}
 
           {/* Loading */}
@@ -719,7 +809,7 @@ function App() {
                             </div>
                             <button onClick={e => { e.stopPropagation(); handleOpenQuickTrade(pos.asset.id); }}
                               className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90"
-                              style={{ background: 'rgba(100,210,255,0.1)', border: '1px solid rgba(100,210,255,0.2)' }} title="Quick trade">
+                              style={{ background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.2)' }} title="Quick trade">
                               <svg className="w-3.5 h-3.5" style={{ color: 'var(--accent-blue)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                             </button>
                           </div>
@@ -761,7 +851,7 @@ function App() {
                       <input type="number" step="any" autoFocus value={editingPriceValue} onChange={e => setEditingPriceValue(e.target.value)}
                         onKeyDown={e => { if (e.key === 'Enter') handleSavePrice(); if (e.key === 'Escape') handleCancelEditPrice(); }}
                         className="flex-1 bg-transparent text-right text-[18px] font-bold font-mono outline-none" style={{ color: 'var(--accent-blue)' }} placeholder="0.00" />
-                      <button onClick={handleSavePrice} className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ background: 'rgba(48,209,88,0.15)', color: 'var(--accent-green)' }}>Save</button>
+                      <button onClick={handleSavePrice} className="text-[11px] font-semibold px-2 py-1 rounded-lg" style={{ background: 'rgba(52,211,153,0.15)', color: 'var(--accent-green)' }}>Save</button>
                       <button onClick={handleCancelEditPrice} className="text-[11px] font-semibold" style={{ color: 'var(--text-quaternary)' }}>✕</button>
                     </>
                   ) : (
@@ -781,7 +871,7 @@ function App() {
                       onClick={(e) => { e.stopPropagation(); handleFetchSinglePrice(currentAssetPosition.asset); }}
                       disabled={fetchingPriceAssetId === currentAssetPosition.asset.id}
                       className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-40"
-                      style={{ background: 'rgba(48,209,88,0.1)', border: '1px solid rgba(48,209,88,0.2)' }}
+                      style={{ background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.2)' }}
                       title="Refresh Price">
                       {fetchingPriceAssetId === currentAssetPosition.asset.id ? (
                         <div className="w-3.5 h-3.5 border-2 border-transparent border-t-[var(--accent-green)] rounded-full animate-spin" />
@@ -823,12 +913,12 @@ function App() {
           style={{
             bottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)', right: '24px',
             width: '56px', height: '56px', borderRadius: '50%',
-            background: 'linear-gradient(135deg, rgba(100,210,255,0.3), rgba(125,122,255,0.3))',
-            border: '1px solid rgba(100,210,255,0.4)',
+            background: 'var(--accent-green)',
+            border: '1px solid var(--accent-green)',
             backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-            boxShadow: '0 8px 32px rgba(100,210,255,0.2), 0 0 0 0.5px rgba(255,255,255,0.1) inset',
+            boxShadow: '0 8px 32px rgba(52,211,153,0.3)',
           }} title="Quick Trade (N)">
-          <svg className="w-6 h-6" style={{ color: 'var(--accent-blue)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg className="w-6 h-6" style={{ color: '#000' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
         </button>

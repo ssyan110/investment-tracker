@@ -14,10 +14,10 @@ interface AllocationChartProps {
 }
 
 const ASSET_COLORS: Record<AssetType, string> = {
-  [AssetType.GOLD]: '#FFD60A',
-  [AssetType.ETF]: '#7D7AFF',
-  [AssetType.STOCK]: '#5AC8FA',
-  [AssetType.CRYPTO]: '#FF9F0A',
+  [AssetType.GOLD]: '#fbbf24',
+  [AssetType.ETF]: '#8b5cf6',
+  [AssetType.STOCK]: '#22d3ee',
+  [AssetType.CRYPTO]: '#fb923c',
 };
 
 const ASSET_LABELS: Record<AssetType, string> = {

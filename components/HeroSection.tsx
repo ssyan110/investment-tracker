@@ -34,13 +34,13 @@ export const HeroSection = ({
   return (
     <div className="glass-elevated p-5 animate-slide-up">
       <div
-        className="text-[11px] font-semibold uppercase tracking-widest mb-1"
-        style={{ color: 'var(--text-tertiary)' }}
+        className="text-[12px] font-medium uppercase tracking-widest mb-1"
+        style={{ color: 'var(--text-tertiary)', letterSpacing: '0.5px' }}
       >
         Total Portfolio
       </div>
       <div
-        className="text-[32px] font-bold font-mono tracking-tight leading-tight"
+        className="text-[40px] font-bold font-mono tracking-tight leading-tight"
         style={{ color: 'var(--text-primary)' }}
       >
         {formatCurrency(totalValue)}
