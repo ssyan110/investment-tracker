@@ -212,4 +212,98 @@ describe('HTTP price API fallback', () => {
       lastPriceFetchedAt: '2026-05-02T12:00:01.000Z',
     });
   });
+
+  it('falls back to direct TWSE fetching when the local API and Edge Function are unavailable', async () => {
+    import.meta.env.VITE_API_URL = 'http://localhost:3000/api';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          stat: 'OK',
+          data: [
+            ['115/04/01', '2,010,969', '132,078,877', '65.70', '65.95', '65.20', '65.80', '0.15', '1,358'],
+            ['115/04/30', '4,888,888', '345,555,555', '70.10', '71.10', '69.80', '70.95', '0.55', '2,468'],
+          ],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    invokeMock.mockResolvedValue({
+      data: null,
+      error: new Error('Failed to send a request to the Edge Function'),
+    });
+
+    const result = await fetchSinglePrice({
+      ...asset,
+      symbol: '00646',
+      name: 'Yuanta S&P 500 ETF',
+      type: AssetType.ETF,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json'),
+    );
+    expect(result).toEqual({
+      symbol: '00646',
+      price: 70.95,
+      currency: 'TWD',
+      timestamp: expect.any(String),
+    });
+  });
+
+  it('retries the previous TWSE month when the current month has no trading data yet', async () => {
+    import.meta.env.VITE_API_URL = 'http://localhost:3000/api';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          stat: '很抱歉，沒有符合條件的資料!',
+          data: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          stat: 'OK',
+          data: [
+            ['115/04/30', '4,888,888', '345,555,555', '70.10', '71.10', '69.80', '70.95', '0.55', '2,468'],
+          ],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    invokeMock.mockResolvedValue({
+      data: null,
+      error: new Error('Failed to send a request to the Edge Function'),
+    });
+
+    const result = await fetchSinglePrice({
+      ...asset,
+      symbol: '00646',
+      name: 'Yuanta S&P 500 ETF',
+      type: AssetType.ETF,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json'),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json'),
+    );
+    expect(result).toEqual({
+      symbol: '00646',
+      price: 70.95,
+      currency: 'TWD',
+      timestamp: expect.any(String),
+    });
+  });
 });

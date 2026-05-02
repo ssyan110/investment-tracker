@@ -110,6 +110,63 @@ function ensureCompleteServerSideResults(
   ));
 }
 
+async function fetchTwsePricesDirect(symbols: SymbolRequest[]): Promise<PriceResult[]> {
+  if (symbols.length === 0) return [];
+
+  const now = new Date();
+  const currentMonthDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  const lastDayOfPreviousMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const previousMonthDate = `${lastDayOfPreviousMonth.getFullYear()}${String(lastDayOfPreviousMonth.getMonth() + 1).padStart(2, '0')}${String(lastDayOfPreviousMonth.getDate()).padStart(2, '0')}`;
+  const candidateDates = Array.from(new Set([currentMonthDate, previousMonthDate]));
+
+  return Promise.all(symbols.map(async (symbolRequest) => {
+    const stockNo = stripTwSuffix(symbolRequest.symbol);
+    let lastError: PriceResult | null = null;
+
+    for (const dateStr of candidateDates) {
+      try {
+        const response = await fetch(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${stockNo}`);
+        if (!response.ok) {
+          lastError = errorResult(symbolRequest.symbol, 'TWD', `TWSE HTTP ${response.status}`);
+          continue;
+        }
+
+        const data = await response.json() as { stat?: string; data?: string[][] };
+        if (data.stat !== 'OK' || !Array.isArray(data.data) || data.data.length === 0) {
+          lastError = errorResult(symbolRequest.symbol, 'TWD', `No data for ${symbolRequest.symbol}`);
+          continue;
+        }
+
+        const lastRow = data.data[data.data.length - 1];
+        const price = parseFloat((lastRow?.[6] ?? '').replace(/,/g, ''));
+        if (!Number.isFinite(price) || price <= 0) {
+          lastError = errorResult(symbolRequest.symbol, 'TWD', `Invalid price for ${symbolRequest.symbol}`);
+          continue;
+        }
+
+        return {
+          symbol: symbolRequest.symbol,
+          price,
+          currency: 'TWD',
+          timestamp: new Date().toISOString(),
+        };
+      } catch (err) {
+        lastError = errorResult(symbolRequest.symbol, 'TWD', err instanceof Error ? err.message : 'TWSE fetch failed');
+      }
+    }
+
+    return lastError ?? errorResult(symbolRequest.symbol, 'TWD', 'TWSE fetch failed');
+  }));
+}
+
+function shouldFallbackToDirectTwse(results: PriceResult[]): boolean {
+  return results.length > 0 && results.every(result => (
+    result.price === null
+    && !!result.error
+    && (result.error.includes('HTTP price API unavailable') || result.error.includes('Edge Function unavailable'))
+  ));
+}
+
 async function fetchViaHttpPriceApi(symbols: SymbolRequest[]): Promise<PriceResult[]> {
   if (symbols.length === 0) return [];
 
@@ -190,6 +247,18 @@ async function fetchServerSidePrices(symbols: SymbolRequest[]): Promise<PriceRes
   return fetchViaEdgeFunction(symbols, priorErrorMessage);
 }
 
+async function fetchTwStockPricesWithFallback(symbols: SymbolRequest[]): Promise<PriceResult[]> {
+  if (symbols.length === 0) return [];
+
+  const primaryResults = await fetchServerSidePrices(symbols);
+  if (!shouldFallbackToDirectTwse(primaryResults)) {
+    return primaryResults;
+  }
+
+  console.warn('[price] Server-side TW fetch unavailable, falling back to direct TWSE fetch');
+  return fetchTwsePricesDirect(symbols);
+}
+
 // ── Crypto: CoinGecko API (CORS-friendly, no proxy needed) ──────────────────
 
 async function fetchCryptoPricesDirect(symbols: SymbolRequest[]): Promise<PriceResult[]> {
@@ -224,21 +293,28 @@ async function fetchPrices(symbols: SymbolRequest[]): Promise<PriceResult[]> {
   const groups: Record<string, SymbolRequest[]> = { TW_STOCK: [], US_STOCK: [], GOLD: [], CRYPTO: [] };
   for (const sym of symbols) groups[sym.type].push(sym);
 
-  // Route through Edge Function for TW_STOCK, US_STOCK, GOLD
-  // CoinGecko is CORS-friendly so we call it directly from the browser
-  const edgeFunctionSymbols = [...groups.TW_STOCK, ...groups.US_STOCK, ...groups.GOLD];
+  // TW_STOCK gets a final direct-browser fallback because TWSE's monthly endpoint is CORS-accessible.
+  // US_STOCK and GOLD still require server-side access.
+  const serverSideSymbols = [...groups.US_STOCK, ...groups.GOLD];
 
-  const [serverResults, cryptoResults] = await Promise.allSettled([
-    fetchServerSidePrices(edgeFunctionSymbols),
+  const [twResults, serverResults, cryptoResults] = await Promise.allSettled([
+    fetchTwStockPricesWithFallback(groups.TW_STOCK),
+    fetchServerSidePrices(serverSideSymbols),
     fetchCryptoPricesDirect(groups.CRYPTO),
   ]);
 
   const results: PriceResult[] = [];
 
+  if (twResults.status === 'fulfilled') {
+    results.push(...twResults.value);
+  } else {
+    groups.TW_STOCK.forEach(symbol => results.push(errorResult(symbol.symbol, 'TWD', 'Fetch failed')));
+  }
+
   if (serverResults.status === 'fulfilled') {
     results.push(...serverResults.value);
   } else {
-    edgeFunctionSymbols.forEach(s => {
+    serverSideSymbols.forEach(s => {
       const currency = currencyForSymbolType(s.type);
       results.push(errorResult(s.symbol, currency, 'Fetch failed'));
     });
