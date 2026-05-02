@@ -140,7 +140,7 @@ async function fetchBotGoldPrice(
   if (symbols.length === 0) return [];
 
   try {
-    const res = await fetch('https://rate.bot.com.tw/gold/passbook', { signal });
+    const res = await fetch('https://rate.bot.com.tw/gold/chart/day/TWD', { signal });
     if (!res.ok) {
       return symbols.map((s) =>
         errorResult(s.symbol, 'TWD', `Bank of Taiwan returned HTTP ${res.status}`),

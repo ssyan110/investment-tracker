@@ -52,6 +52,15 @@ function errorResult(symbol, currency, message) {
 }
 
 function parseBotGoldHtml(html) {
+  const rowRegex = /<tr[^>]*>[\s\S]*?<td[^>]*>\s*[^<]+\s*<\/td>[\s\S]*?<td[^>]*>\s*[^<]+\s*<\/td>[\s\S]*?<td[^>]*>\s*[^<]+\s*<\/td>[\s\S]*?<td[^>]*>\s*([\d,]+(?:\.\d+)?)\s*<\/td>[\s\S]*?<td[^>]*>\s*([\d,]+(?:\.\d+)?)\s*<\/td>[\s\S]*?<\/tr>/g;
+  let latestSellPrice = null;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const sellPrice = parseFloat(rowMatch[2].replace(/,/g, ''));
+    if (!Number.isNaN(sellPrice) && sellPrice > 0) latestSellPrice = sellPrice;
+  }
+  if (latestSellPrice !== null) return latestSellPrice;
+
   const sellPriceRegex = /本行賣出[^<]*<[^>]*>[^<]*?<[^>]*?>([\d,]+(?:\.\d+)?)/;
   const match = sellPriceRegex.exec(html);
   if (match) {
@@ -136,7 +145,7 @@ async function fetchTwsePrices(symbols, signal) {
 
 async function fetchBotGoldPrices(symbols, signal) {
   if (symbols.length === 0) return [];
-  const response = await fetch('https://rate.bot.com.tw/gold/passbook', { signal });
+  const response = await fetch('https://rate.bot.com.tw/gold/chart/day/TWD', { signal });
   if (!response.ok) {
     return symbols.map((symbol) => errorResult(symbol.symbol, 'TWD', `Bank of Taiwan returned HTTP ${response.status}`));
   }

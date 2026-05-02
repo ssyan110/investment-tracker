@@ -90,6 +90,39 @@ const arbGarbageHtml = fc.constantFrom(
 // ─── Property Tests ──────────────────────────────────────────────────
 
 describe('parseBotGoldHtml property-based tests', () => {
+  it('extracts the latest 台灣銀行黃金存摺本行賣出價格 from the day chart table', () => {
+    const html = `
+      <table class="table table-striped table-bordered table-condensed table-hover toggle-circle" title="歷史營業時間黃金存摺牌價">
+        <thead>
+          <tr>
+            <th>時間</th>
+            <th class="hidden-phone">牌價幣別</th>
+            <th class="hidden-phone">商品重量</th>
+            <th>本行買入價格</th>
+            <th>本行賣出價格</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-center">14:59</td>
+            <td class="text-center hidden-phone">新台幣 (TWD)</td>
+            <td class="text-center hidden-phone">1公克</td>
+            <td class="text-right">4649</td>
+            <td class="text-right">4700</td>
+          </tr>
+          <tr>
+            <td class="text-center">15:24</td>
+            <td class="text-center hidden-phone">新台幣 (TWD)</td>
+            <td class="text-center hidden-phone">1公克</td>
+            <td class="text-right">4652</td>
+            <td class="text-right">4703</td>
+          </tr>
+        </tbody>
+      </table>`;
+
+    expect(parseBotGoldHtml(html)).toBe(4703);
+  });
+
   // **Validates: Requirements 7.1, 7.2**
   it('Property 5a: extracts a positive numeric TWD/gram value from valid BOT gold HTML', () => {
     fc.assert(

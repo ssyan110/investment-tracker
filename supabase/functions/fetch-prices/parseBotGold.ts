@@ -7,6 +7,17 @@
  *   新臺幣 (TWD) | X,XXX | X,XXX
  */
 export function parseBotGoldHtml(html: string): number {
+  // Strategy 0: parse the historical day-chart table and return the latest sell price.
+  // BOT renders rows as: time, currency, weight, buy, sell.
+  const rowRegex = /<tr[^>]*>[\s\S]*?<td[^>]*>\s*[^<]+\s*<\/td>[\s\S]*?<td[^>]*>\s*[^<]+\s*<\/td>[\s\S]*?<td[^>]*>\s*[^<]+\s*<\/td>[\s\S]*?<td[^>]*>\s*([\d,]+(?:\.\d+)?)\s*<\/td>[\s\S]*?<td[^>]*>\s*([\d,]+(?:\.\d+)?)\s*<\/td>[\s\S]*?<\/tr>/g;
+  let latestSellPrice: number | null = null;
+  let rowMatch: RegExpExecArray | null;
+  while ((rowMatch = rowRegex.exec(html)) !== null) {
+    const sellPrice = parseFloat(rowMatch[2].replace(/,/g, ''));
+    if (!isNaN(sellPrice) && sellPrice > 0) latestSellPrice = sellPrice;
+  }
+  if (latestSellPrice !== null) return latestSellPrice;
+
   // Strategy 1: regex for a numeric value immediately following 本行賣出 markup
   const sellPriceRegex = /本行賣出[^<]*<[^>]*>[^<]*?<[^>]*?>([\d,]+(?:\.\d+)?)/;
   const match = sellPriceRegex.exec(html);
