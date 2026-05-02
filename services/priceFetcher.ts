@@ -20,7 +20,7 @@ export interface PriceFetchSummary {
   failed: string[];
 }
 
-/** Strip .tw / .TW suffix and return the bare symbol for TWSE lookup */
+/** Strip .tw / .TW suffix and return the bare symbol */
 export function stripTwSuffix(symbol: string): string {
   return symbol.replace(/\.tw$/i, '');
 }
@@ -43,56 +43,159 @@ function errorResult(symbol: string, currency: string, message: string): PriceRe
   return { symbol, price: null, currency, timestamp: new Date().toISOString(), error: message };
 }
 
-// ── Taiwan Stocks: TWSE exchangeReport API (has CORS) ───────────────────────
-
-async function fetchTwsePrices(symbols: SymbolRequest[]): Promise<PriceResult[]> {
-  if (symbols.length === 0) return [];
-  const now = new Date();
-  const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-
-  // Fetch sequentially with small delay to avoid TWSE rate limiting
-  const results: PriceResult[] = [];
-  for (const s of symbols) {
-    try {
-      const stockNo = stripTwSuffix(s.symbol);
-      const url = `https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${stockNo}`;
-      console.log(`[price] Fetching TWSE ${stockNo}…`);
-      const res = await fetch(url);
-      if (!res.ok) {
-        console.warn(`[price] TWSE ${stockNo} HTTP ${res.status}`);
-        results.push(errorResult(s.symbol, 'TWD', `TWSE HTTP ${res.status}`));
-        continue;
-      }
-      const data = await res.json();
-      if (data.stat !== 'OK' || !data.data?.length) {
-        console.warn(`[price] TWSE ${stockNo} no data, stat=${data.stat}`);
-        results.push(errorResult(s.symbol, 'TWD', `No data for ${s.symbol}`));
-        continue;
-      }
-      const lastRow = data.data[data.data.length - 1];
-      const priceStr = lastRow[6]?.replace(/,/g, '');
-      const price = parseFloat(priceStr);
-      if (isNaN(price) || price <= 0) {
-        results.push(errorResult(s.symbol, 'TWD', `Invalid price for ${s.symbol}`));
-        continue;
-      }
-      console.log(`[price] TWSE ${stockNo} = ${price} TWD`);
-      results.push({ symbol: s.symbol, price, currency: 'TWD', timestamp: new Date().toISOString() });
-      // Small delay between requests to be polite to TWSE
-      if (symbols.length > 1) await new Promise(r => setTimeout(r, 300));
-    } catch (err) {
-      console.warn(`[price] TWSE ${s.symbol} error:`, err);
-      results.push(errorResult(s.symbol, 'TWD', err instanceof Error ? err.message : 'TWSE fetch failed'));
-    }
-  }
-  return results;
+function currencyForSymbolType(type: SymbolRequest['type']): string {
+  return type === 'GOLD' || type === 'TW_STOCK' ? 'TWD' : type === 'CRYPTO' ? 'USDT' : 'USD';
 }
 
-// ── Crypto: CoinGecko API (has CORS) ────────────────────────────────────────
+function getConfiguredPriceApiBaseUrl(): string | null {
+  const raw = import.meta.env.VITE_API_URL?.trim();
+  return raw ? raw.replace(/\/+$/, '') : null;
+}
 
-async function fetchCryptoPrices(symbols: SymbolRequest[]): Promise<PriceResult[]> {
+const COINGECKO_SYMBOL_MAP: Record<string, string> = {
+  btc: 'bitcoin',
+  eth: 'ethereum',
+  sol: 'solana',
+  bnb: 'binancecoin',
+  doge: 'dogecoin',
+  ada: 'cardano',
+  xrp: 'ripple',
+  trx: 'tron',
+  ton: 'the-open-network',
+  link: 'chainlink',
+  matic: 'matic-network',
+  avax: 'avalanche-2',
+};
+
+function toCoinGeckoId(symbol: string): string {
+  const normalized = symbol.trim().toLowerCase();
+  return COINGECKO_SYMBOL_MAP[normalized] ?? normalized;
+}
+
+function prepareServerSideSymbols(symbols: SymbolRequest[]) {
+  const cleanedSymbols = symbols.map(s => ({
+    ...s,
+    symbol: s.type === 'TW_STOCK' ? stripTwSuffix(s.symbol) : s.symbol,
+  }));
+
+  const originalSymbolMap = new Map<string, string[]>();
+  for (let i = 0; i < symbols.length; i++) {
+    const cleanedSymbol = cleanedSymbols[i].symbol;
+    const originals = originalSymbolMap.get(cleanedSymbol) ?? [];
+    originals.push(symbols[i].symbol);
+    originalSymbolMap.set(cleanedSymbol, originals);
+  }
+
+  return { cleanedSymbols, originalSymbolMap };
+}
+
+function restoreOriginalSymbols(results: PriceResult[], originalSymbolMap: Map<string, string[]>): PriceResult[] {
+  return results.map(result => ({
+    ...result,
+    symbol: originalSymbolMap.get(result.symbol)?.shift() ?? result.symbol,
+  }));
+}
+
+function ensureCompleteServerSideResults(
+  requestedSymbols: SymbolRequest[],
+  results: PriceResult[],
+  originalSymbolMap: Map<string, string[]>,
+): PriceResult[] {
+  const restoredResults = restoreOriginalSymbols(results, originalSymbolMap);
+  const resultBySymbol = new Map(restoredResults.map(result => [result.symbol, result]));
+
+  return requestedSymbols.map(symbol => (
+    resultBySymbol.get(symbol.symbol)
+    ?? errorResult(symbol.symbol, currencyForSymbolType(symbol.type), `No price data returned for ${symbol.symbol}`)
+  ));
+}
+
+async function fetchViaHttpPriceApi(symbols: SymbolRequest[]): Promise<PriceResult[]> {
   if (symbols.length === 0) return [];
-  const ids = symbols.map(s => s.symbol.toLowerCase()).join(',');
+
+  const baseUrl = getConfiguredPriceApiBaseUrl();
+  if (!baseUrl) {
+    throw new Error('VITE_API_URL is not configured');
+  }
+
+  const { cleanedSymbols, originalSymbolMap } = prepareServerSideSymbols(symbols);
+  const response = await fetch(`${baseUrl}/prices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ symbols: cleanedSymbols }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const data = await response.json() as { results?: PriceResult[]; error?: string };
+  if (!Array.isArray(data.results)) {
+    throw new Error(data.error ?? 'Invalid response from price API');
+  }
+
+  return ensureCompleteServerSideResults(symbols, data.results, originalSymbolMap);
+}
+
+// ── Edge Function proxy (handles TW_STOCK, US_STOCK, GOLD) ──────────────────
+
+async function fetchViaEdgeFunction(symbols: SymbolRequest[], priorErrorMessage?: string): Promise<PriceResult[]> {
+  if (symbols.length === 0) return [];
+
+  const { cleanedSymbols, originalSymbolMap } = prepareServerSideSymbols(symbols);
+
+  try {
+    console.log(`[price] Invoking Edge Function for: ${cleanedSymbols.map(s => `${s.symbol}(${s.type})`).join(', ')}`);
+    const { data, error } = await supabase.functions.invoke('fetch-prices', {
+      body: { symbols: cleanedSymbols },
+    });
+
+    if (error) {
+      console.error('[price] Edge Function error:', error);
+      throw error;
+    }
+
+    const results = (data?.results as PriceResult[]) ?? [];
+    return ensureCompleteServerSideResults(symbols, results, originalSymbolMap);
+  } catch (err) {
+    const edgeMessage = err instanceof Error ? err.message : 'Edge Function unavailable';
+    const message = priorErrorMessage
+      ? `${priorErrorMessage}; Edge Function unavailable: ${edgeMessage}`
+      : `Edge Function unavailable: ${edgeMessage}`;
+    console.warn('[price] Edge Function failed:', message);
+    return symbols.map(s => {
+      const currency = currencyForSymbolType(s.type);
+      return errorResult(s.symbol, currency, message);
+    });
+  }
+}
+
+async function fetchServerSidePrices(symbols: SymbolRequest[]): Promise<PriceResult[]> {
+  if (symbols.length === 0) return [];
+
+  const apiBaseUrl = getConfiguredPriceApiBaseUrl();
+  let priorErrorMessage: string | undefined;
+
+  if (apiBaseUrl) {
+    try {
+      console.log(`[price] Using HTTP price API at ${apiBaseUrl}`);
+      return await fetchViaHttpPriceApi(symbols);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'HTTP price API unavailable';
+      priorErrorMessage = `HTTP price API unavailable: ${message}`;
+      console.warn('[price] HTTP price API failed, falling back to Edge Function:', message);
+    }
+  }
+
+  return fetchViaEdgeFunction(symbols, priorErrorMessage);
+}
+
+// ── Crypto: CoinGecko API (CORS-friendly, no proxy needed) ──────────────────
+
+async function fetchCryptoPricesDirect(symbols: SymbolRequest[]): Promise<PriceResult[]> {
+  if (symbols.length === 0) return [];
+
+  const ids = symbols.map(s => toCoinGeckoId(s.symbol)).join(',');
   try {
     console.log(`[price] Fetching CoinGecko: ${ids}`);
     const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
@@ -104,7 +207,7 @@ async function fetchCryptoPrices(symbols: SymbolRequest[]): Promise<PriceResult[
     console.log('[price] CoinGecko response:', data);
     const now = new Date().toISOString();
     return symbols.map(s => {
-      const entry = data[s.symbol.toLowerCase()];
+      const entry = data[toCoinGeckoId(s.symbol)];
       return entry?.usd != null
         ? { symbol: s.symbol, price: entry.usd, currency: 'USDT', timestamp: now }
         : errorResult(s.symbol, 'USDT', `No price data for ${s.symbol}`);
@@ -115,49 +218,37 @@ async function fetchCryptoPrices(symbols: SymbolRequest[]): Promise<PriceResult[
   }
 }
 
-// ── US Stocks & Gold: via Supabase Edge Function (server-side proxy) ────────
-
-async function fetchViaEdgeFunction(symbols: SymbolRequest[]): Promise<PriceResult[]> {
-  if (symbols.length === 0) return [];
-  try {
-    const { data, error } = await supabase.functions.invoke('fetch-prices', {
-      body: { symbols },
-    });
-    if (error) throw error;
-    return (data?.results as PriceResult[]) ?? symbols.map(s => errorResult(s.symbol, 'USD', 'No response'));
-  } catch {
-    // Edge Function not deployed or unreachable — return clear error
-    return symbols.map(s =>
-      errorResult(s.symbol, s.type === 'GOLD' ? 'TWD' : 'USD', 'Edge Function unavailable. Deploy fetch-prices to enable.')
-    );
-  }
-}
-
 // ── Main dispatch ───────────────────────────────────────────────────────────
 
 async function fetchPrices(symbols: SymbolRequest[]): Promise<PriceResult[]> {
   const groups: Record<string, SymbolRequest[]> = { TW_STOCK: [], US_STOCK: [], GOLD: [], CRYPTO: [] };
   for (const sym of symbols) groups[sym.type].push(sym);
 
-  // Direct client-side calls for CORS-friendly APIs
-  // Edge Function proxy for APIs that block CORS
-  const [tw, crypto, proxy] = await Promise.allSettled([
-    fetchTwsePrices(groups.TW_STOCK),
-    fetchCryptoPrices(groups.CRYPTO),
-    fetchViaEdgeFunction([...groups.US_STOCK, ...groups.GOLD]),
+  // Route through Edge Function for TW_STOCK, US_STOCK, GOLD
+  // CoinGecko is CORS-friendly so we call it directly from the browser
+  const edgeFunctionSymbols = [...groups.TW_STOCK, ...groups.US_STOCK, ...groups.GOLD];
+
+  const [serverResults, cryptoResults] = await Promise.allSettled([
+    fetchServerSidePrices(edgeFunctionSymbols),
+    fetchCryptoPricesDirect(groups.CRYPTO),
   ]);
 
   const results: PriceResult[] = [];
-  if (tw.status === 'fulfilled') results.push(...tw.value);
-  else groups.TW_STOCK.forEach(s => results.push(errorResult(s.symbol, 'TWD', 'Fetch failed')));
 
-  if (crypto.status === 'fulfilled') results.push(...crypto.value);
-  else groups.CRYPTO.forEach(s => results.push(errorResult(s.symbol, 'USDT', 'Fetch failed')));
+  if (serverResults.status === 'fulfilled') {
+    results.push(...serverResults.value);
+  } else {
+    edgeFunctionSymbols.forEach(s => {
+      const currency = currencyForSymbolType(s.type);
+      results.push(errorResult(s.symbol, currency, 'Fetch failed'));
+    });
+  }
 
-  if (proxy.status === 'fulfilled') results.push(...proxy.value);
-  else [...groups.US_STOCK, ...groups.GOLD].forEach(s =>
-    results.push(errorResult(s.symbol, s.type === 'GOLD' ? 'TWD' : 'USD', 'Fetch failed'))
-  );
+  if (cryptoResults.status === 'fulfilled') {
+    results.push(...cryptoResults.value);
+  } else {
+    groups.CRYPTO.forEach(s => results.push(errorResult(s.symbol, 'USDT', 'Fetch failed')));
+  }
 
   return results;
 }

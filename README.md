@@ -75,9 +75,12 @@ Create a `.env.local` file in the project root:
 ```env
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key
+VITE_API_URL=http://localhost:3000/api
 ```
 
 You can find these values in your Supabase dashboard under **Settings → API**.
+
+`VITE_API_URL` points the frontend to the local Node price-proxy server used during development. If you deploy the Supabase `fetch-prices` Edge Function instead, you can omit `VITE_API_URL` and the app will fall back to the Edge Function automatically.
 
 ### 4. Run the dev server
 
@@ -85,7 +88,17 @@ You can find these values in your Supabase dashboard under **Settings → API**.
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) in your browser.
+`npm run dev` now starts both:
+
+- the Vite frontend on [http://localhost:5173](http://localhost:5173)
+- the local price API on [http://localhost:3000](http://localhost:3000)
+
+If you want to run them separately:
+
+```bash
+npm run dev:api
+npm run dev:web
+```
 
 ## Usage
 

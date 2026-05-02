@@ -3,6 +3,30 @@ import { round } from '../utils';
 import { calculateInventoryState } from '../engine';
 import { supabase } from './supabaseClient';
 
+let hasWarnedMissingSnapshotTable = false;
+
+type SupabaseLikeError = { code?: string; message?: string } | null | undefined;
+
+function isMissingDailySnapshotsTable(error: SupabaseLikeError): boolean {
+  return error?.code === 'PGRST205'
+    || Boolean(error?.message?.includes("Could not find the table 'public.daily_snapshots'"));
+}
+
+function markSnapshotFeatureUnavailable(error: SupabaseLikeError): void {
+  if (!hasWarnedMissingSnapshotTable) {
+    console.warn('daily_snapshots table is unavailable; snapshot features will be skipped until the migration is applied.', error);
+    hasWarnedMissingSnapshotTable = true;
+  }
+}
+
+function handleSnapshotQueryError(error: SupabaseLikeError): boolean {
+  if (isMissingDailySnapshotsTable(error)) {
+    markSnapshotFeatureUnavailable(error);
+    return true;
+  }
+  return false;
+}
+
 // ===== DB ↔ TS CONVERTERS (Task 2.1) =====
 
 /** Convert a DB row (snake_case) to a DailySnapshot (camelCase) */
@@ -42,6 +66,7 @@ export const upsertSnapshot = async (snapshot: Omit<DailySnapshot, 'id'>): Promi
     .upsert([dbRow], { onConflict: 'asset_id,date' });
 
   if (error) {
+    if (handleSnapshotQueryError(error)) return;
     console.error('Failed to upsert snapshot', error);
     throw error;
   }
@@ -57,6 +82,7 @@ export const upsertSnapshotBatch = async (snapshots: Omit<DailySnapshot, 'id'>[]
     .upsert(dbRows, { onConflict: 'asset_id,date' });
 
   if (error) {
+    if (handleSnapshotQueryError(error)) return;
     console.error('Failed to upsert snapshot batch', error);
     throw error;
   }
@@ -77,6 +103,7 @@ export const loadAssetSnapshots = async (
     .order('date', { ascending: true });
 
   if (error) {
+    if (handleSnapshotQueryError(error)) return [];
     console.error('Failed to load asset snapshots', error);
     throw error;
   }
@@ -97,6 +124,7 @@ export const loadPortfolioSnapshots = async (
     .order('date', { ascending: true });
 
   if (error) {
+    if (handleSnapshotQueryError(error)) return [];
     console.error('Failed to load portfolio snapshots', error);
     throw error;
   }
@@ -124,6 +152,7 @@ export const deleteAssetSnapshots = async (assetId: string): Promise<void> => {
     .eq('asset_id', assetId);
 
   if (error) {
+    if (handleSnapshotQueryError(error)) return;
     console.error('Failed to delete asset snapshots', error);
     throw error;
   }
@@ -270,6 +299,10 @@ export const backfillIfNeeded = async (
     .select('*', { count: 'exact', head: true });
 
   if (error) {
+    if (handleSnapshotQueryError(error)) {
+      hasRunBackfill = true;
+      return;
+    }
     console.error('Failed to count existing snapshots', error);
     hasRunBackfill = true;
     return;
