@@ -136,7 +136,7 @@ describe('HTTP price API fallback', () => {
 
     expect(invokeMock).not.toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd',
+      'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_last_updated_at=true',
     );
     expect(result).toEqual({
       symbol: 'BTC',
@@ -272,6 +272,12 @@ describe('HTTP price API fallback', () => {
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
+          tables: [],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
           stat: 'OK',
           data: [
             ['115/04/30', '4,888,888', '345,555,555', '70.10', '71.10', '69.80', '70.95', '0.55', '2,468'],
@@ -297,11 +303,58 @@ describe('HTTP price API fallback', () => {
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
+      expect.stringContaining('https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock'),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
       expect.stringContaining('https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json'),
     );
     expect(result).toEqual({
       symbol: '00646',
       price: 70.95,
+      currency: 'TWD',
+      timestamp: expect.any(String),
+    });
+  });
+
+  it('falls back to TPEX monthly close for OTC Taiwan symbols', async () => {
+    import.meta.env.VITE_API_URL = 'http://localhost:3000/api';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 404 })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ stat: '很抱歉，沒有符合條件的資料!', data: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          tables: [{
+            data: [
+              ['115/05/08', '22,979', '3,636,575', '153.00', '165.00', '149.50', '162.00', '9.00', '16,597'],
+            ],
+          }],
+        }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    invokeMock.mockResolvedValue({
+      data: null,
+      error: new Error('Failed to send a request to the Edge Function'),
+    });
+
+    const result = await fetchSinglePrice({
+      ...asset,
+      symbol: '8069',
+      name: 'E Ink',
+      type: AssetType.STOCK,
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock'),
+    );
+    expect(result).toEqual({
+      symbol: '8069',
+      price: 162,
       currency: 'TWD',
       timestamp: expect.any(String),
     });

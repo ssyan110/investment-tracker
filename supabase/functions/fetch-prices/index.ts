@@ -79,59 +79,112 @@ function errorResult(symbol: string, currency: string, message: string): PriceRe
 
 // ── TWSE Price Fetcher (Taiwan Stocks / ETFs) ───────────────────────────────
 
+function formatTwseDate(date: Date): string {
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatTpexDate(date: Date): string {
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function getTaiwanMonthlyDateCandidates(now = new Date()): Date[] {
+  return [
+    new Date(now.getFullYear(), now.getMonth(), now.getDate()),
+    new Date(now.getFullYear(), now.getMonth(), 0),
+  ];
+}
+
+function parseTaiwanClosePrice(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const price = parseFloat(raw.replace(/,/g, '').trim());
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
+
+function rocDateToIsoTimestamp(raw: string | undefined): string {
+  if (!raw) return new Date().toISOString();
+  const match = raw.match(/^(\d{2,3})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!match) return new Date().toISOString();
+  const year = Number(match[1]) + 1911;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Date(Date.UTC(year, month - 1, day, 8, 0, 0)).toISOString();
+}
+
+async function fetchTwseMonthlyClose(symbol: SymbolRequest, date: Date, signal: AbortSignal): Promise<PriceResult | null> {
+  const response = await fetch(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${formatTwseDate(date)}&stockNo=${symbol.symbol}`, { signal });
+  if (!response.ok) return null;
+  const data = await response.json() as { stat?: string; data?: string[][] };
+  if (data.stat !== 'OK' || !Array.isArray(data.data) || data.data.length === 0) return null;
+  for (let i = data.data.length - 1; i >= 0; i -= 1) {
+    const row = data.data[i];
+    const price = parseTaiwanClosePrice(row?.[6]);
+    if (price !== null) return { symbol: symbol.symbol, price, currency: 'TWD', timestamp: rocDateToIsoTimestamp(row?.[0]) };
+  }
+  return null;
+}
+
+async function fetchTpexMonthlyClose(symbol: SymbolRequest, date: Date, signal: AbortSignal): Promise<PriceResult | null> {
+  const response = await fetch(`https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=${symbol.symbol}&date=${formatTpexDate(date)}&id=&response=json`, { signal });
+  if (!response.ok) return null;
+  const data = await response.json() as { tables?: Array<{ data?: string[][] }> };
+  const rows = data.tables?.flatMap((table) => Array.isArray(table.data) ? table.data : []) ?? [];
+  if (rows.length === 0) return null;
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    const price = parseTaiwanClosePrice(row?.[6]);
+    if (price !== null) return { symbol: symbol.symbol, price, currency: 'TWD', timestamp: rocDateToIsoTimestamp(row?.[0]) };
+  }
+  return null;
+}
+
+async function fetchRealtimeMisPrice(symbol: SymbolRequest, signal: AbortSignal): Promise<PriceResult | null> {
+  const codes = [`tse_${symbol.symbol}.tw`, `otc_${symbol.symbol}.tw`].join('|');
+  const response = await fetch(`https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${codes}`, { signal });
+  if (!response.ok) return null;
+  const data = await response.json();
+  const msgArray: Array<Record<string, string>> = Array.isArray(data?.msgArray) ? data.msgArray : [];
+  for (const entry of msgArray) {
+    const price = parseTaiwanClosePrice(entry.z);
+    if (entry.c === symbol.symbol && price !== null) {
+      const timestamp = entry.tlong ? new Date(Number(entry.tlong)).toISOString() : new Date().toISOString();
+      return { symbol: symbol.symbol, price, currency: 'TWD', timestamp };
+    }
+  }
+  return null;
+}
+
+async function fetchSingleTaiwanPrice(symbol: SymbolRequest, signal: AbortSignal): Promise<PriceResult> {
+  let lastError = 'No TWSE/TPEX price data returned';
+  for (const date of getTaiwanMonthlyDateCandidates()) {
+    try {
+      const twse = await fetchTwseMonthlyClose(symbol, date, signal);
+      if (twse) return twse;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'TWSE monthly close fetch failed';
+    }
+    try {
+      const tpex = await fetchTpexMonthlyClose(symbol, date, signal);
+      if (tpex) return tpex;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : 'TPEX monthly close fetch failed';
+    }
+  }
+  try {
+    const realtime = await fetchRealtimeMisPrice(symbol, signal);
+    if (realtime) return realtime;
+  } catch (error) {
+    lastError = error instanceof Error ? error.message : 'TWSE realtime fetch failed';
+  }
+  return errorResult(symbol.symbol, 'TWD', lastError);
+}
+
 async function fetchTwsePrices(
   symbols: SymbolRequest[],
   signal: AbortSignal,
 ): Promise<PriceResult[]> {
   if (symbols.length === 0) return [];
-
-  // Build pipe-delimited stock codes: tse_{symbol}.tw
-  const codes = symbols.map((s) => `tse_${s.symbol}.tw`).join('|');
-  const url = `https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch=${codes}`;
-
-  try {
-    const res = await fetch(url, { signal });
-    if (!res.ok) {
-      return symbols.map((s) =>
-        errorResult(s.symbol, 'TWD', `TWSE API returned HTTP ${res.status}`),
-      );
-    }
-
-    const data = await res.json();
-    const msgArray: Array<Record<string, string>> = data?.msgArray ?? [];
-
-    // Build a lookup from stock code → price
-    const priceMap = new Map<string, number>();
-    for (const msg of msgArray) {
-      // msg.c is the stock code (e.g. "2330"), msg.z is the current price
-      if (msg.c && msg.z && msg.z !== '-') {
-        const price = parseFloat(msg.z);
-        if (!isNaN(price)) {
-          priceMap.set(msg.c, price);
-        }
-      }
-    }
-
-    const now = new Date().toISOString();
-    return symbols.map((s) => {
-      const price = priceMap.get(s.symbol);
-      if (price !== undefined) {
-        return { symbol: s.symbol, price, currency: 'TWD', timestamp: now };
-      }
-      return errorResult(s.symbol, 'TWD', `No price data returned for ${s.symbol}`);
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown TWSE API error';
-    return symbols.map((s) => errorResult(s.symbol, 'TWD', message));
-  }
+  return Promise.all(symbols.map((symbol) => fetchSingleTaiwanPrice(symbol, signal)));
 }
-
-
-// ── BOT Gold Passbook Price Fetcher ─────────────────────────────────────────
-
-// Re-export parseBotGoldHtml from the extracted module for backward compatibility
-export { parseBotGoldHtml } from './parseBotGold.ts';
-import { parseBotGoldHtml } from './parseBotGold.ts';
 
 async function fetchBotGoldPrice(
   symbols: SymbolRequest[],
@@ -177,8 +230,6 @@ async function fetchUsStockPrices(
 ): Promise<PriceResult[]> {
   if (symbols.length === 0) return [];
 
-  const now = new Date().toISOString();
-
   const promises = symbols.map(async (s): Promise<PriceResult> => {
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(s.symbol)}`;
@@ -188,10 +239,14 @@ async function fetchUsStockPrices(
       }
 
       const data = await res.json();
-      const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
+      const meta = data?.chart?.result?.[0]?.meta;
+      const price = meta?.regularMarketPrice;
+      const timestamp = typeof meta?.regularMarketTime === 'number'
+        ? new Date(meta.regularMarketTime * 1000).toISOString()
+        : new Date().toISOString();
 
       if (typeof price === 'number' && price > 0) {
-        return { symbol: s.symbol, price, currency: 'USD', timestamp: now };
+        return { symbol: s.symbol, price, currency: 'USD', timestamp };
       }
 
       return errorResult(s.symbol, 'USD', `No price data returned for ${s.symbol}`);
@@ -218,7 +273,7 @@ async function fetchCryptoPrices(
 
   // CoinGecko expects lowercase IDs, comma-joined
   const ids = symbols.map((s) => s.symbol.toLowerCase()).join(',');
-  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`;
+  const url = `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_last_updated_at=true`;
 
   try {
     const res = await fetch(url, { signal });
@@ -228,13 +283,15 @@ async function fetchCryptoPrices(
       );
     }
 
-    const data: Record<string, { usd?: number }> = await res.json();
-    const now = new Date().toISOString();
+    const data: Record<string, { usd?: number; last_updated_at?: number }> = await res.json();
 
     return symbols.map((s) => {
-      const entry = data[s.symbol.toLowerCase()];
+      const entry = data[toCoinGeckoId(s.symbol)];
+      const timestamp = typeof entry?.last_updated_at === 'number'
+        ? new Date(entry.last_updated_at * 1000).toISOString()
+        : new Date().toISOString();
       if (entry && typeof entry.usd === 'number') {
-        return { symbol: s.symbol, price: entry.usd, currency: 'USDT', timestamp: now };
+        return { symbol: s.symbol, price: entry.usd, currency: 'USDT', timestamp };
       }
       return errorResult(s.symbol, 'USDT', `No price data returned for ${s.symbol}`);
     });

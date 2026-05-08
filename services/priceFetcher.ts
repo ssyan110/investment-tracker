@@ -110,53 +110,97 @@ function ensureCompleteServerSideResults(
   ));
 }
 
-async function fetchTwsePricesDirect(symbols: SymbolRequest[]): Promise<PriceResult[]> {
-  if (symbols.length === 0) return [];
+function formatTwseDate(date: Date): string {
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+}
 
-  const now = new Date();
-  const currentMonthDate = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
-  const lastDayOfPreviousMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-  const previousMonthDate = `${lastDayOfPreviousMonth.getFullYear()}${String(lastDayOfPreviousMonth.getMonth() + 1).padStart(2, '0')}${String(lastDayOfPreviousMonth.getDate()).padStart(2, '0')}`;
-  const candidateDates = Array.from(new Set([currentMonthDate, previousMonthDate]));
+function formatTpexDate(date: Date): string {
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+}
 
-  return Promise.all(symbols.map(async (symbolRequest) => {
-    const stockNo = stripTwSuffix(symbolRequest.symbol);
-    let lastError: PriceResult | null = null;
+function getTaiwanMonthlyDateCandidates(now = new Date()): Date[] {
+  const current = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const previousMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  return [current, previousMonth];
+}
 
-    for (const dateStr of candidateDates) {
-      try {
-        const response = await fetch(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${dateStr}&stockNo=${stockNo}`);
-        if (!response.ok) {
-          lastError = errorResult(symbolRequest.symbol, 'TWD', `TWSE HTTP ${response.status}`);
-          continue;
-        }
+function parseTaiwanClosePrice(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const price = parseFloat(raw.replace(/,/g, '').trim());
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
 
-        const data = await response.json() as { stat?: string; data?: string[][] };
-        if (data.stat !== 'OK' || !Array.isArray(data.data) || data.data.length === 0) {
-          lastError = errorResult(symbolRequest.symbol, 'TWD', `No data for ${symbolRequest.symbol}`);
-          continue;
-        }
+function rocDateToIsoTimestamp(raw: string | undefined): string {
+  if (!raw) return new Date().toISOString();
+  const match = raw.match(/^(\d{2,3})\/(\d{1,2})\/(\d{1,2})$/);
+  if (!match) return new Date().toISOString();
+  const year = Number(match[1]) + 1911;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  return new Date(Date.UTC(year, month - 1, day, 8, 0, 0)).toISOString();
+}
 
-        const lastRow = data.data[data.data.length - 1];
-        const price = parseFloat((lastRow?.[6] ?? '').replace(/,/g, ''));
-        if (!Number.isFinite(price) || price <= 0) {
-          lastError = errorResult(symbolRequest.symbol, 'TWD', `Invalid price for ${symbolRequest.symbol}`);
-          continue;
-        }
+async function fetchTwseMonthlyClose(stockNo: string, date: Date): Promise<PriceResult | null> {
+  const response = await fetch(`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${formatTwseDate(date)}&stockNo=${stockNo}`);
+  if (!response.ok) return null;
 
-        return {
-          symbol: symbolRequest.symbol,
-          price,
-          currency: 'TWD',
-          timestamp: new Date().toISOString(),
-        };
-      } catch (err) {
-        lastError = errorResult(symbolRequest.symbol, 'TWD', err instanceof Error ? err.message : 'TWSE fetch failed');
-      }
+  const data = await response.json() as { stat?: string; data?: string[][] };
+  if (data.stat !== 'OK' || !Array.isArray(data.data) || data.data.length === 0) return null;
+
+  for (let i = data.data.length - 1; i >= 0; i -= 1) {
+    const row = data.data[i];
+    const price = parseTaiwanClosePrice(row?.[6]);
+    if (price !== null) {
+      return { symbol: stockNo, price, currency: 'TWD', timestamp: rocDateToIsoTimestamp(row?.[0]) };
+    }
+  }
+  return null;
+}
+
+async function fetchTpexMonthlyClose(stockNo: string, date: Date): Promise<PriceResult | null> {
+  const response = await fetch(`https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock?code=${stockNo}&date=${formatTpexDate(date)}&id=&response=json`);
+  if (!response.ok) return null;
+
+  const data = await response.json() as { tables?: Array<{ data?: string[][] }> };
+  const rows = data.tables?.flatMap(table => Array.isArray(table.data) ? table.data : []) ?? [];
+  if (rows.length === 0) return null;
+
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    const price = parseTaiwanClosePrice(row?.[6]);
+    if (price !== null) {
+      return { symbol: stockNo, price, currency: 'TWD', timestamp: rocDateToIsoTimestamp(row?.[0]) };
+    }
+  }
+  return null;
+}
+
+async function fetchTaiwanMonthlyClose(symbolRequest: SymbolRequest): Promise<PriceResult> {
+  const stockNo = stripTwSuffix(symbolRequest.symbol);
+  let lastError = 'No TWSE/TPEX close data returned';
+
+  for (const candidateDate of getTaiwanMonthlyDateCandidates()) {
+    try {
+      const twseResult = await fetchTwseMonthlyClose(stockNo, candidateDate);
+      if (twseResult) return { ...twseResult, symbol: symbolRequest.symbol };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : 'TWSE monthly close fetch failed';
     }
 
-    return lastError ?? errorResult(symbolRequest.symbol, 'TWD', 'TWSE fetch failed');
-  }));
+    try {
+      const tpexResult = await fetchTpexMonthlyClose(stockNo, candidateDate);
+      if (tpexResult) return { ...tpexResult, symbol: symbolRequest.symbol };
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : 'TPEX monthly close fetch failed';
+    }
+  }
+
+  return errorResult(symbolRequest.symbol, 'TWD', lastError);
+}
+
+async function fetchTwsePricesDirect(symbols: SymbolRequest[]): Promise<PriceResult[]> {
+  if (symbols.length === 0) return [];
+  return Promise.all(symbols.map(fetchTaiwanMonthlyClose));
 }
 
 function shouldFallbackToDirectTwse(results: PriceResult[]): boolean {
@@ -251,12 +295,28 @@ async function fetchTwStockPricesWithFallback(symbols: SymbolRequest[]): Promise
   if (symbols.length === 0) return [];
 
   const primaryResults = await fetchServerSidePrices(symbols);
-  if (!shouldFallbackToDirectTwse(primaryResults)) {
+  const failedSymbols = symbols.filter(symbol => {
+    const result = primaryResults.find(candidate => candidate.symbol === symbol.symbol);
+    return !result || result.price === null || !!result.error;
+  });
+
+  if (failedSymbols.length === 0) {
     return primaryResults;
   }
 
-  console.warn('[price] Server-side TW fetch unavailable, falling back to direct TWSE fetch');
-  return fetchTwsePricesDirect(symbols);
+  if (shouldFallbackToDirectTwse(primaryResults)) {
+    console.warn('[price] Server-side TW fetch unavailable, falling back to direct TWSE/TPEX monthly close fetch');
+  } else {
+    console.warn(`[price] Retrying ${failedSymbols.length} failed TW symbol(s) via direct TWSE/TPEX monthly close fetch`);
+  }
+
+  const fallbackResults = await fetchTwsePricesDirect(failedSymbols);
+  const fallbackBySymbol = new Map(fallbackResults.map(result => [result.symbol, result]));
+  return symbols.map(symbol => {
+    const fallback = fallbackBySymbol.get(symbol.symbol);
+    if (fallback && fallback.price !== null && !fallback.error) return fallback;
+    return primaryResults.find(result => result.symbol === symbol.symbol) ?? fallback ?? errorResult(symbol.symbol, 'TWD', 'TW price fetch failed');
+  });
 }
 
 // ── Crypto: CoinGecko API (CORS-friendly, no proxy needed) ──────────────────
@@ -267,19 +327,21 @@ async function fetchCryptoPricesDirect(symbols: SymbolRequest[]): Promise<PriceR
   const ids = symbols.map(s => toCoinGeckoId(s.symbol)).join(',');
   try {
     console.log(`[price] Fetching CoinGecko: ${ids}`);
-    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd`);
+    const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_last_updated_at=true`);
     if (!res.ok) {
       console.warn(`[price] CoinGecko HTTP ${res.status}`);
       return symbols.map(s => errorResult(s.symbol, 'USDT', `CoinGecko HTTP ${res.status}`));
     }
-    const data: Record<string, { usd?: number }> = await res.json();
+    const data: Record<string, { usd?: number; last_updated_at?: number }> = await res.json();
     console.log('[price] CoinGecko response:', data);
-    const now = new Date().toISOString();
     return symbols.map(s => {
       const entry = data[toCoinGeckoId(s.symbol)];
+      const timestamp = typeof entry?.last_updated_at === 'number'
+        ? new Date(entry.last_updated_at * 1000).toISOString()
+        : new Date().toISOString();
       return entry?.usd != null
-        ? { symbol: s.symbol, price: entry.usd, currency: 'USDT', timestamp: now }
-        : errorResult(s.symbol, 'USDT', `No price data for ${s.symbol}`);
+        ? { symbol: s.symbol, price: entry.usd, currency: 'USDT', timestamp }
+        : errorResult(s.symbol, 'USDT', `No price data returned for ${s.symbol}`);
     });
   } catch (err) {
     console.warn('[price] CoinGecko error:', err);
